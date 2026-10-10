@@ -1,0 +1,387 @@
+/* The models.dev panel: a route card per configured provider, a row per model. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  /* The main column clips its overflow, so the panel divides its own height
+     between a header that stays put and a body that scrolls. */
+  height: 100%;
+  overflow: hidden;
+  max-width: 960px;
+}
+
+/* A sibling of the scroller, not a sticky child of it: a sticky header would
+   have to cancel the scroller's padding with a negative margin, and sticky
+   insets resolve against the margin box, so that padding comes back as an
+   uncovered band the route cards scroll through. */
+.header {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 32px 16px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* The only scroller: every route card below the first stays reachable however
+   many models are configured. min-height: 0 keeps it at its flex height rather
+   than growing to fit the whole list. */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 32px 48px;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.meta {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.diagnostic {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.route {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-label-secondary) 20%, transparent);
+  border-radius: var(--dsw-radius-lg);
+}
+
+.routeHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The whole left side folds the card: the chevron, the name, the route key and
+   the difference count are one control, so the reader's target is the row they
+   are already looking at rather than a separate caret. */
+.routeToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.routeToggle:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+  border-radius: var(--dsw-radius-xs);
+}
+
+.chevronOpen,
+.chevronClosed {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 120ms ease;
+}
+
+.chevronClosed {
+  transform: rotate(-90deg);
+}
+
+.routeName {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+.routeKey {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.modelHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modelName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelId {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unmatched {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.upToDate {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-state-success-secondary);
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.fieldName {
+  flex: none;
+  width: 96px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.fieldValues {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.valueConfigured {
+  color: var(--dsw-alias-label-tertiary);
+  text-decoration: line-through;
+}
+
+.valueTo {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.valuePublished {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capability {
+  padding: 2px 8px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.description {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The add-model dialog body: one column, so the id sits above the values it
+   filled rather than beside it, and the chooser gets the full width its model
+   names need. */
+.addForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.addField {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The id row is the only field with a control beside it, so the input takes the
+   room between the fixed-width label and the fuzzy-search button. A wrapping
+   label would put that button inside the label's activation target, so this row
+   associates the two by id instead. The class stays on the row rather than on
+   the shared Input, whose class prop the CSS module's optional keys cannot
+   satisfy under exactOptionalPropertyTypes. */
+.addIdRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.addIdRow > span:not(.addFieldName) {
+  flex: 1;
+  min-width: 0;
+}
+
+.addFieldName {
+  flex: none;
+  width: 96px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The chooser scrolls rather than growing: an id several providers publish can
+   reach dozens of entries, and the dialog's own footer has to stay reachable. */
+.candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.candidate {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 8px;
+  border: 0.5px solid transparent;
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.candidate:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.candidate[aria-checked='true'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 60%, transparent);
+}
+
+.candidate:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.candidateName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.candidateId {
+  grid-column: 1;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.candidateMeta {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.addImage {
+  align-self: flex-start;
+}
