@@ -224,7 +224,12 @@ src/client/AddModelDialog.tsx the add-model dialog
 src/client/EditModelDialog.tsx the edit-model dialog
 src/client/RemoveModelDialog.tsx the removal confirmation
 src/client/locales.ts        zh + en dictionaries
-tests/                       238 specs
+tests/                       the specs: matching, write paths, bindings, and the page
 CHANGELOG.md                 one section per release, written for a reader
 AGENTS.md                    the versioning, commit and changelog conventions
+LICENSE                      MIT
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

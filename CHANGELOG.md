@@ -8,6 +8,11 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## [Unreleased]
 
+### Added
+
+- An MIT `LICENSE` file. The package manifest declared MIT from the start, but the text
+  itself was missing, and a manifest field with no file behind it grants nothing.
+
 ## [0.1.0] - 2026-10-12
 
 First release. Built against dsh `0.2.1-alpha.2`.
@@ -32,8 +37,8 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - **Remove** on a model row, behind a confirmation that names what it takes out and what
   happens to the rest of the route.
 - Simplified Chinese and English dictionaries for the whole panel.
-- 235 specs over the matching, the write paths, the browser-local bindings, and the
-  rendered page.
+- Specs over the matching, the write paths, the browser-local bindings, and the rendered
+  page.
 
 [Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.1.0
