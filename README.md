@@ -223,6 +223,7 @@ src/client/AddModelDialog.tsx the add-model dialog
 src/client/EditModelDialog.tsx the edit-model dialog
 src/client/RemoveModelDialog.tsx the removal confirmation
 src/client/locales.ts        zh + en dictionaries
-tests/                       235 specs
+tests/                       238 specs
 CHANGELOG.md                 one section per release, written for a reader
+AGENTS.md                    the versioning, commit and changelog conventions
 ```

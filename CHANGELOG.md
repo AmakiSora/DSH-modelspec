@@ -8,8 +8,6 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## [Unreleased]
 
-Nothing yet.
-
 ## [0.1.0] - 2026-10-12
 
 First release. Built against dsh `0.2.1-alpha.2`.
