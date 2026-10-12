@@ -25,7 +25,16 @@ export interface EntryBinding {
 export type Bindings = ReadonlyMap<string, EntryBinding>
 
 /** The storage key, namespaced by host so two deployments on one browser differ. */
-const KEY_PREFIX = 'model-aid/bindings/'
+const KEY_PREFIX = 'dsh-modelspec/bindings/'
+
+/**
+ * The prefix this panel filed bindings under before it was renamed. A browser
+ * that pinned entries under the old name still holds them, and reading an empty
+ * file instead would look exactly like "nothing was ever pinned", so the old
+ * file is consulted whenever the new one is absent. Nothing is written there
+ * again: the next write carries every entry forward under the new prefix.
+ */
+const LEGACY_KEY_PREFIX = 'model-aid/bindings/'
 
 /**
  * Fallback for a browser that offers no storage — a private window with it
@@ -79,11 +88,38 @@ export function bindingKey(routeKey: string, modelId: string): string {
 }
 
 /**
+ * Read one storage entry, or `undefined` when it is absent or unreadable.
+ * @param store - the browser's storage.
+ * @param prefix - the file prefix to look under.
+ * @param host - the host the bindings belong to.
+ * @returns the file's parsed contents, or `undefined`.
+ */
+function readFile(store: Storage, prefix: string, host: string): Record<string, unknown> | undefined {
+  let raw: string | null
+  try {
+    raw = store.getItem(prefix + host)
+  } catch {
+    return undefined
+  }
+  if (raw === null) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+  return parsed as Record<string, unknown>
+}
+
+/**
  * Read every binding this browser holds.
  *
  * A file that has been edited by hand, or written by another version of this
  * panel, is discarded whole rather than half-applied: a binding this panel
- * cannot read is one it would overwrite on the next change anyway.
+ * cannot read is one it would overwrite on the next change anyway. The file
+ * this panel wrote before it was renamed is consulted only when the current
+ * one is absent, so a rename cannot quietly unpin everything a reader chose.
  *
  * @param host - the host the bindings belong to.
  * @returns every binding, empty when there are none or they are unreadable.
@@ -91,22 +127,10 @@ export function bindingKey(routeKey: string, modelId: string): string {
 export function readBindings(host: string): Bindings {
   const store = storage()
   if (store === null) return session(host)
-  let raw: string | null
-  try {
-    raw = store.getItem(KEY_PREFIX + host)
-  } catch {
-    return session(host)
-  }
-  if (raw === null) return session(host)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return new Map()
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return new Map()
+  const file = readFile(store, KEY_PREFIX, host) ?? readFile(store, LEGACY_KEY_PREFIX, host)
+  if (file === undefined) return session(host)
   const bindings = new Map<string, EntryBinding>()
-  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(file)) {
     if (typeof value !== 'object' || value === null) continue
     const { providerId, modelId } = value as { providerId?: unknown; modelId?: unknown }
     if (typeof providerId === 'string' && providerId !== '' && typeof modelId === 'string' && modelId !== '') {

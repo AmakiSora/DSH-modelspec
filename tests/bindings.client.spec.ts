@@ -72,8 +72,8 @@ describe('entry bindings', () => {
 
   it('discards a file it cannot read rather than half-applying it', () => {
     const store = new Map<string, string>([
-      ['model-aid/bindings/broken', '{not json'],
-      ['model-aid/bindings/partial', JSON.stringify({ a: { providerId: 'p' }, b: { providerId: 'p', modelId: '' } })],
+      ['dsh-modelspec/bindings/broken', '{not json'],
+      ['dsh-modelspec/bindings/partial', JSON.stringify({ a: { providerId: 'p' }, b: { providerId: 'p', modelId: '' } })],
     ])
     useStorage({
       getItem: (key: string) => store.get(key) ?? null,
@@ -82,6 +82,47 @@ describe('entry bindings', () => {
     expect(readBindings('broken')).toEqual(new Map())
     // A half-written entry, and one missing half its name, are both skipped.
     expect([...readBindings('partial')]).toEqual([])
+  })
+
+  it('still reads bindings filed under the name this panel had before', () => {
+    // The rename must not read as "nothing was ever pinned", which is exactly
+    // what an empty file looks like from here.
+    const store = new Map<string, string>([
+      ['model-aid/bindings/host', JSON.stringify({ [KEY]: { providerId: 'azure', modelId: 'gpt-4o' } })],
+    ])
+    useStorage({
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: () => {},
+    } as unknown as Storage)
+    expect(readBindings('host').get(KEY)).toEqual({ providerId: 'azure', modelId: 'gpt-4o' })
+  })
+
+  it('prefers the current file over the one the rename left behind', () => {
+    const store = new Map<string, string>([
+      ['model-aid/bindings/host', JSON.stringify({ [KEY]: { providerId: 'azure', modelId: 'gpt-4o' } })],
+      ['dsh-modelspec/bindings/host', JSON.stringify({ [KEY]: { providerId: 'openai', modelId: 'gpt-4o' } })],
+    ])
+    useStorage({
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: () => {},
+    } as unknown as Storage)
+    expect(readBindings('host').get(KEY)).toEqual({ providerId: 'openai', modelId: 'gpt-4o' })
+  })
+
+  it('carries the old file forward on the next write, and leaves it in place', () => {
+    const store = new Map<string, string>([
+      ['model-aid/bindings/host', JSON.stringify({ [KEY]: { providerId: 'azure', modelId: 'gpt-4o' } })],
+    ])
+    useStorage({
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value) },
+    } as unknown as Storage)
+    writeBinding('host', KEY, { providerId: 'openai', modelId: 'gpt-4o' })
+    expect(JSON.parse(store.get('dsh-modelspec/bindings/host') ?? '{}')).toEqual({
+      [KEY]: { providerId: 'openai', modelId: 'gpt-4o' },
+    })
+    // The old file is not deleted: something older may still be reading it.
+    expect(store.has('model-aid/bindings/host')).toBe(true)
   })
 
   it('survives a storage that refuses every operation', () => {

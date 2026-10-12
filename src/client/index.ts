@@ -49,11 +49,11 @@ export const inject = ['slots', 'locale', 'remote', 'remote.llm', 'remote.settin
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'model-aid: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-modelspec: dictionaries')
   const t = ctx.locale.bind(NS)
   const controller = new ModelsDevController(ctx, new ModelsDevCatalog())
   const face = controller.inject()
-  ctx.effect(() => () => { controller.dispose() }, 'model-aid: controller')
+  ctx.effect(() => () => { controller.dispose() }, 'dsh-modelspec: controller')
   // The Host says when a settings namespace changed — from this page, the
   // Models settings page, the CLI, or another browser — so a comparison never
   // sits on top of a configuration that has moved. A catalog read is not
@@ -64,7 +64,7 @@ export function apply(ctx: ClientContext): void {
       ctx.on('connection/reset', () => { controller.invalidate() }),
     ]
     return () => { for (const dispose of disposers) dispose() }
-  }, 'model-aid: host invalidations')
+  }, 'dsh-modelspec: host invalidations')
 
   // The page is a global panel: it belongs to the profile, not to a Session,
   // and the sidebar's entry selects it.

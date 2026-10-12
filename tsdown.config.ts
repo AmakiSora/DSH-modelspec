@@ -1,5 +1,5 @@
 /**
- * Build configuration for the model-aid dsh client plugin.
+ * Build configuration for the dsh-modelspec dsh client plugin.
  *
  * The browser half must match the artifact contract the dsh web shell expects
  * from every client plugin, because the shell loads `lib/client.js` itself:
@@ -24,8 +24,16 @@ import { isBuiltin } from 'node:module'
 import { defineConfig, type UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
-/** Package name, stamped into the `__ModuleLoader__` handoff and the style tags. */
-const PACKAGE = 'model-aid'
+/**
+ * Package name, stamped into the `__ModuleLoader__` handoff and the style tags.
+ *
+ * This is the identity the shell registers the plugin under, and it is spelled
+ * out here rather than read from package.json on purpose: the two would drift the
+ * moment a manifest is renamed, and a bundle that registers under a name its own
+ * package no longer declares is the hardest split-brain to diagnose from the
+ * outside. Change this and the staged manifest together, never one of them.
+ */
+const PACKAGE = 'dsh-modelspec'
 
 /**
  * Module-table specifiers the shell seeds. These must resolve to the shell's own
@@ -55,7 +63,7 @@ const SHARED_MODULES = new Set([
 const INLINABLE = /^(?:@deepseek-ai\/dsh-(?:util-values|util-crypto|brand|typert-protocol)(?:\/|$)|@deepseek-ai\/(?:cosmokit|schemastery)(?:\/|$))/
 
 /** Virtual-id prefix for compiled stylesheets; the suffix keeps ids off tsdown's own css pipeline. */
-const CSS_PREFIX = '\0model-aid-css:'
+const CSS_PREFIX = '\0dsh-modelspec-css:'
 const CSS_SUFFIX = '.mjs'
 
 /**
@@ -89,7 +97,7 @@ function styleInjectionModule(fileId: string, code: string, classMap?: Record<st
 function clientPlugins(): NonNullable<UserConfig['plugins']> {
   return [
     {
-      name: 'model-aid-css-modules',
+      name: 'dsh-modelspec-css-modules',
       resolveId(source: string, importer: string | undefined) {
         if (!source.endsWith('.module.css')) return null
         const absolute = importer === undefined ? source : new URL(source, `file:///${importer.replace(/\\/g, '/')}`).pathname.replace(/^\//, '')
@@ -116,13 +124,13 @@ function clientPlugins(): NonNullable<UserConfig['plugins']> {
       },
     },
     {
-      name: 'model-aid-bundle-purity',
+      name: 'dsh-modelspec-bundle-purity',
       resolveId(source: string) {
         if (!source.startsWith('@deepseek-ai/')) return null
         if (SHARED_MODULES.has(source)) return null
         if (INLINABLE.test(source)) return null
         throw new Error(
-          `model-aid bundle purity: "${source}" is not a shell module-table entry or an inline-safe layer. `
+          `dsh-modelspec bundle purity: "${source}" is not a shell module-table entry or an inline-safe layer. `
           + 'A cross-plugin value import would either duplicate a shared runtime identity or need a module request this package has not declared.',
         )
       },

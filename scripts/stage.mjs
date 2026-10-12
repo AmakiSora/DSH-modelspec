@@ -7,6 +7,11 @@
  * the browser bundle inlines everything the shell does not share, so a
  * dependency list here would only invite a second copy of a shared runtime.
  *
+ * The name and the directory agree because both appear in a profile's own
+ * configuration: the manifest name is the dependency key a profile writes, and
+ * the directory is the path that key points at. Renaming one without the other
+ * leaves a profile referring to a package that is not there.
+ *
  * Usage: node scripts/stage.mjs [--out <dir>]
  */
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -14,16 +19,17 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const NAME = 'dsh-modelspec'
 const OUT = process.argv.includes('--out')
   ? resolve(process.argv[process.argv.indexOf('--out') + 1])
-  : join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.dsh', 'plugins', 'model-aid')
+  : join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.dsh', 'plugins', NAME)
 
 /** Artifacts the profile needs, relative to the project root. */
 const ARTIFACTS = ['lib/index.js', 'lib/client.js', 'lib/client.js.map']
 
 /** The staged manifest: the entry points, the client manifest, and nothing else. */
 const MANIFEST = {
-  name: 'model-aid',
+  name: NAME,
   version: '0.1.0',
   private: true,
   type: 'module',

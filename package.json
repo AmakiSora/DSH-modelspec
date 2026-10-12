@@ -1,5 +1,5 @@
 {
-  "name": "model-aid",
+  "name": "dsh-modelspec",
   "version": "0.1.0",
   "private": true,
   "description": "A dsh web-client plugin: compares the models.dev catalog with the models this deployment configured and writes the differences back",

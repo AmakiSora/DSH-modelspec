@@ -4,11 +4,6 @@ A [dsh](https://github.com/deepseek-ai/deepseek-harness) web-client plugin. It r
 [models.dev](https://models.dev) catalog, compares it against the models this deployment
 actually configured, and writes the differences back.
 
-> The repository is **DSH-modelspec**; the npm package and the installed plugin are
-> **`model-aid`**. The shorter name is what a profile's `package.json`, its
-> `cordis.patch.yml` and the staged directory all use, so it is kept as it is in every
-> install instruction below.
-
 The panel is the **Model specs** entry in the left sidebar. One card per configured provider
 route, one row per model inside it, and the stored value beside the published one wherever
 they disagree. You can adopt one model's values, one route's, or the whole page at once.
@@ -132,7 +127,7 @@ pnpm run lint
 
 ## Install into a profile
 
-`pnpm run stage` copies the built artifacts into `~/.dsh/plugins/model-aid` and writes a
+`pnpm run stage` copies the built artifacts into `~/.dsh/plugins/dsh-modelspec` and writes a
 dependency-free manifest there. Then point a profile at it:
 
 `~/.dsh/profiles/<name>/package.json`
@@ -140,7 +135,7 @@ dependency-free manifest there. Then point a profile at it:
 ```json
 {
   "dependencies": {
-    "model-aid": "link:C:/Users/<you>/.dsh/plugins/model-aid"
+    "dsh-modelspec": "link:C:/Users/<you>/.dsh/plugins/dsh-modelspec"
   }
 }
 ```
@@ -149,9 +144,14 @@ dependency-free manifest there. Then point a profile at it:
 
 ```yaml
 - insert:
-    - id: model-aid
-      name: 'model-aid'
+    - id: dsh-modelspec
+      name: 'dsh-modelspec'
 ```
+
+The three names are one identity: the staged manifest's `name` is the dependency key, the
+staged directory is the path that key points at, and the plugin registers itself under the
+name `tsdown.config.ts` hardcodes. Rename all three together or the profile and the bundle
+stop agreeing.
 
 Restart the host, then open **Model specs** in the sidebar.
 
@@ -172,8 +172,9 @@ contract this project cannot change from the outside:
 - `*.module.css` is compiled at build time by lightningcss and injected as a tagged `<style>`
   when the factory executes, default-exporting the hashed class map the components import.
 
-The `model-aid-bundle-purity` tsdown plugin rejects any other `@deepseek-ai/` value import at
-build time. Cross-plugin behaviour goes through Cordis services and slots, not imports.
+The `dsh-modelspec-bundle-purity` tsdown plugin rejects any other `@deepseek-ai/` value
+import at build time. Cross-plugin behaviour goes through Cordis services and slots, not
+imports.
 
 ## Releasing
 
