@@ -153,6 +153,11 @@ staged directory is the path that key points at, and the plugin registers itself
 name `tsdown.config.ts` hardcodes. Rename all three together or the profile and the bundle
 stop agreeing.
 
+Earlier installs of this panel were named `model-aid`. After renaming, a profile's
+`package.json` and `cordis.patch.yml` need the new key and id, and the old
+`~/.dsh/plugins/model-aid` directory is no longer read. Entry sources a browser had pinned
+under the old name are carried across on first use, so nothing is silently unpinned.
+
 Restart the host, then open **Model specs** in the sidebar.
 
 Use `node scripts/stage.mjs --out <dir>` to stage somewhere else.
