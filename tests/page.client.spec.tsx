@@ -23,7 +23,7 @@ const IDLE: ModelsDevState = {
   routes: [],
   writing: [],
   notice: null,
-  add: null,
+  picker: null,
 }
 
 /** One configured model row. */
@@ -106,11 +106,11 @@ function props(state: ModelsDevState): ModelsDevPageProps {
     applyModel: vi.fn(),
     applyRoute: vi.fn(),
     applyAll: vi.fn(),
-    addModel: vi.fn(),
+    pickModel: vi.fn(),
     searchModel: vi.fn(),
-    searchSimilarModels: vi.fn(),
-    submitModel: vi.fn(),
-    cancelAdd: vi.fn(),
+    addModel: vi.fn(),
+    saveModel: vi.fn(),
+    cancelPick: vi.fn(),
   } as unknown as ModelsDevPageProps
 }
 
@@ -372,10 +372,10 @@ function candidate(providerId: string, id: string, published: Record<string, unk
 }
 
 /** The ready state with the add dialog open for the first route. */
-function adding(overrides: Partial<NonNullable<ModelsDevState['add']>> = {}): ModelsDevState {
+function adding(overrides: Partial<NonNullable<ModelsDevState['picker']>> = {}): ModelsDevState {
   return {
     ...ready(),
-    add: { routeKey: 'llm-pi-ai/acme', modelId: '', fuzzy: false, searching: false, candidates: [], error: null, ...overrides },
+    picker: { routeKey: 'llm-pi-ai/acme', modelKey: null, modelId: '', fuzzy: false, searching: false, candidates: [], error: null, ...overrides },
   }
 }
 
@@ -401,7 +401,7 @@ describe('adding a model', () => {
     const injected = props(ready())
     render(<ModelsDevPage {...injected} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add model' }))
-    expect(injected.addModel).toHaveBeenCalledWith('llm-pi-ai/acme')
+    expect(injected.pickModel).toHaveBeenCalledWith('llm-pi-ai/acme', null)
   })
 
   it('opens no dialog for an adapter preset route', () => {
@@ -419,7 +419,7 @@ describe('adding a model', () => {
     const injected = props(adding())
     render(<ModelsDevPage {...injected} />)
     type('Model id', 'acme-2')
-    expect(injected.searchModel).toHaveBeenCalledWith('llm-pi-ai/acme', 'acme-2')
+    expect(injected.searchModel).toHaveBeenCalledWith('acme-2', false)
   })
 
   it('names the provider the dialog is adding to', () => {
@@ -518,7 +518,7 @@ describe('adding a model', () => {
     type('Context length', '200000')
     fireEvent.click(screen.getByLabelText('Accepts image input'))
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect(injected.submitModel).toHaveBeenCalledWith('llm-pi-ai/acme', {
+    expect(injected.addModel).toHaveBeenCalledWith({
       id: 'acme-2',
       name: '  Acme 2  ',
       contextWindow: 200000,
@@ -536,7 +536,7 @@ describe('adding a model', () => {
     type('Model id', 'acme-2')
     type('Context length', '')
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect(injected.submitModel).toHaveBeenCalledWith('llm-pi-ai/acme', expect.not.objectContaining({ contextWindow: 200000 }))
+    expect(injected.addModel).toHaveBeenCalledWith(expect.not.objectContaining({ contextWindow: 200000 }))
   })
 
   it('refuses an id the route already configures, and says which one', () => {
@@ -565,8 +565,8 @@ describe('adding a model', () => {
     const injected = props(adding())
     render(<ModelsDevPage {...injected} />)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(injected.cancelAdd).toHaveBeenCalled()
-    expect(injected.submitModel).not.toHaveBeenCalled()
+    expect(injected.cancelPick).toHaveBeenCalled()
+    expect(injected.addModel).not.toHaveBeenCalled()
   })
 
   it('reports the entry that was added', () => {
@@ -600,8 +600,8 @@ describe('adding a model by fuzzy search', () => {
     render(<ModelsDevPage {...injected} />)
     type('Model id', 'acme-2')
     fireEvent.click(screen.getByRole('button', { name: 'Fuzzy search' }))
-    expect(injected.searchSimilarModels).toHaveBeenCalledWith('llm-pi-ai/acme', 'acme-2')
-    expect(injected.searchModel).toHaveBeenCalledWith('llm-pi-ai/acme', 'acme-2')
+    expect(injected.searchModel).toHaveBeenCalledWith('acme-2', true)
+    expect(injected.searchModel).toHaveBeenCalledWith('acme-2', false)
     expect(field('Model id').value).toBe('acme-2')
   })
 
@@ -674,7 +674,7 @@ describe('adding a model by fuzzy search', () => {
     // the search happened to be asked about.
     type('Model id', 'acme-2')
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect(injected.submitModel).toHaveBeenCalledWith('llm-pi-ai/acme', {
+    expect(injected.addModel).toHaveBeenCalledWith({
       id: 'acme-2',
       name: 'acme-2 name',
       contextWindow: 200000,
@@ -688,5 +688,151 @@ describe('adding a model by fuzzy search', () => {
     panel(adding({ fuzzy: true, modelId: 'totally-unrelated', candidates: [] }))
     expect(screen.getByText('No entry came close to that id.')).toBeTruthy()
     expect(screen.queryByText(/models\.dev has no matching entry/)).toBeNull()
+  })
+})
+
+/** The ready state with the picker open on the first route's only model. */
+function editing(overrides: Partial<NonNullable<ModelsDevState['picker']>> = {}, row?: Partial<ModelsDevState['routes'][number]['models'][number]>): ModelsDevState {
+  const base = readyRoute()
+  const model = { ...base.models[0]!, ...row }
+  return {
+    ...ready(),
+    routes: [{ ...base, models: [model] }],
+    picker: { routeKey: 'llm-pi-ai/acme', modelKey: 'llm-pi-ai/acme/0', modelId: '', fuzzy: false, searching: false, candidates: [], error: null, ...overrides },
+  }
+}
+
+describe('editing a configured model', () => {
+  afterEach(cleanup)
+
+  it('offers the editor at the right of every model row', () => {
+    const injected = props(ready())
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(injected.pickModel).toHaveBeenCalledWith('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+  })
+
+  it('offers no editor for a preset row, or where writes are refused', () => {
+    const preset = readyRoute()
+    panel(withRoute({ ...preset, route: { ...preset.route, preset: true } }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Edit' }).disabled).toBe(true)
+    cleanup()
+    panel({ ...ready(), writable: false })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Edit' }).disabled).toBe(true)
+  })
+
+  it('opens on the entry the model follows, not on a sibling template', () => {
+    panel(editing())
+    expect(screen.getByRole('dialog', { name: 'Edit model configuration' })).toBeTruthy()
+    // The entry this model follows is what the picker is about, so its published
+    // values are what the editor opens on — the stored ones are one Apply away.
+    expect(field('Display name (optional)').value).toBe('acme-1')
+    expect(field('Context length').value).toBe('1048576')
+    expect(field('Model id').value).toBe('acme-1')
+  })
+
+  it('opens on what the model stores when no entry follows it', () => {
+    const orphan = readyRoute().models[0]!
+    panel(editing({}, {
+      model: { ...orphan.model, name: 'Stored Name', contextWindow: 4096, maxTokens: 512 },
+      match: { provider: 'acme', modelId: 'acme-1', strategy: 'none' },
+      differences: [],
+    }))
+    // Nothing to adopt, so the only values available are the ones it stores.
+    expect(field('Display name (optional)').value).toBe('Stored Name')
+    expect(field('Context length').value).toBe('4096')
+    expect(field('Max output').value).toBe('512')
+  })
+
+  it('says which entry the model follows, and whether the reader chose it', () => {
+    panel(editing())
+    expect(screen.getByText(/matched from the model id/)).toBeTruthy()
+    cleanup()
+    const bound = readyRoute().models[0]!
+    panel(editing({}, {
+      match: { ...bound.match, strategy: 'bound', providerKey: 'azure', model: { ...bound.match.model!, providerId: 'azure' } },
+    }))
+    expect(screen.getByText(/pinned by you/)).toBeTruthy()
+  })
+
+  it('marks a row whose entry was pinned', () => {
+    const bound = readyRoute().models[0]!
+    panel(withRoute({
+      ...readyRoute(),
+      models: [{ ...bound, match: { ...bound.match, strategy: 'bound' } }],
+    }))
+    expect(screen.getByText('Pinned')).toBeTruthy()
+    expect(screen.getByText(/the entry you pinned/)).toBeTruthy()
+  })
+
+  it('fills the fields from the entry the reader picks instead', () => {
+    panel(editing({
+      modelId: 'gpt-4o',
+      candidates: [
+        candidate('openai', 'gpt-4o', { contextWindow: 200000, maxOutputTokens: 8192 }),
+        candidate('azure', 'gpt-4o', { contextWindow: 64000 }),
+      ],
+    }))
+    fireEvent.click(screen.getAllByRole('radio')[0] as HTMLElement)
+    expect(field('Context length').value).toBe('200000')
+  })
+
+  it('writes the edit and the entry it should follow together', () => {
+    const injected = props(editing({
+      modelId: 'gpt-4o',
+      candidates: [
+        candidate('openai', 'gpt-4o', { contextWindow: 200000 }),
+        candidate('azure', 'gpt-4o', { contextWindow: 64000 }),
+      ],
+    }))
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getAllByRole('radio')[1] as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(injected.saveModel).toHaveBeenCalledWith(
+      // The chosen entry publishes no output cap, so that field ends up cleared
+      // rather than keeping whatever the model stored under it.
+      { name: 'gpt-4o name', contextWindow: 64000, inputModalities: ['text'] },
+      { providerId: 'azure', modelId: 'gpt-4o' },
+    )
+  })
+
+  it('keeps following the id when the reader changed no entry', () => {
+    const injected = props(editing())
+    render(<ModelsDevPage {...injected} />)
+    type('Context length', '200000')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    // `undefined` is the answer "follow the id again", which is what an edit of
+    // a model that was never pinned should leave behind.
+    expect(injected.saveModel).toHaveBeenCalledWith(
+      expect.objectContaining({ contextWindow: 200000 }),
+      undefined,
+    )
+  })
+
+  it('re-pins the entry the model already followed rather than unpinning it', () => {
+    const bound = readyRoute().models[0]!
+    const injected = props(editing({}, {
+      match: { ...bound.match, strategy: 'bound', providerKey: 'azure', model: { ...bound.match.model!, providerId: 'azure' } },
+    }))
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    // Editing the values of a pinned model must not silently unpin it.
+    expect(injected.saveModel).toHaveBeenCalledWith(
+      expect.anything(),
+      { providerId: 'azure', modelId: 'acme-1' },
+    )
+  })
+
+  it('closes without writing when cancelled', () => {
+    const injected = props(editing())
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(injected.cancelPick).toHaveBeenCalled()
+    expect(injected.saveModel).not.toHaveBeenCalled()
+  })
+
+  it('reports the edit that was saved', () => {
+    panel({ ...ready(), notice: { kind: 'saved' } })
+    expect(screen.getByText('The model configuration was updated.')).toBeTruthy()
   })
 })

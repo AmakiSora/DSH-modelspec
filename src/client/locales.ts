@@ -43,6 +43,7 @@ export const zh = {
   strategyCanonical: '跨提供商规范 ID 一致',
   strategyBare: '去掉厂商前缀后一致',
   strategyNormalized: '忽略大小写、标点和发布日期后一致',
+  strategyBound: '按你指定的条目',
   strategyNone: '无匹配',
   capabilities: '已发布能力',
   capReasoning: '推理',
@@ -85,6 +86,14 @@ export const zh = {
   addProblemContext: '上下文长度必须是正整数。',
   addProblemOutput: '最大输出必须是正整数。',
   noticeAdded: '已添加模型 {id}。',
+  noticeSaved: '已更新模型配置。',
+  editModel: '编辑',
+  editModelTitle: '编辑模型配置',
+  editModelDescription: '「{provider}」中的 {model}',
+  editModelSave: '保存',
+  editModelSourceAuto: '当前条目来源：{entry}（按模型 ID 自动匹配）',
+  editModelSourcePinned: '当前条目来源：{entry}（已手动指定）',
+  modelPinnedTag: '已指定来源',
 } satisfies Record<string, string>
 
 /** models.dev panel locale key union. */
@@ -108,6 +117,7 @@ export const STRATEGY_KEYS = {
   canonical: 'strategyCanonical',
   bare: 'strategyBare',
   normalized: 'strategyNormalized',
+  bound: 'strategyBound',
   none: 'strategyNone',
 } satisfies Record<ModelsDevMatchStrategy, ModelsDevLocaleKey>
 
@@ -151,6 +161,7 @@ export const en = {
   strategyCanonical: 'identical cross-provider canonical id',
   strategyBare: 'identical after dropping the vendor prefix',
   strategyNormalized: 'identical ignoring case, punctuation, and release date',
+  strategyBound: 'the entry you pinned',
   strategyNone: 'no match',
   capabilities: 'Published capabilities',
   capReasoning: 'Reasoning',
@@ -193,4 +204,12 @@ export const en = {
   addProblemContext: 'The context length must be a positive integer.',
   addProblemOutput: 'The max output must be a positive integer.',
   noticeAdded: 'The model {id} was added.',
+  noticeSaved: 'The model configuration was updated.',
+  editModel: 'Edit',
+  editModelTitle: 'Edit model configuration',
+  editModelDescription: '{model} on {provider}',
+  editModelSave: 'Save',
+  editModelSourceAuto: 'Entry source: {entry} (matched from the model id)',
+  editModelSourcePinned: 'Entry source: {entry} (pinned by you)',
+  modelPinnedTag: 'Pinned',
 } satisfies Record<ModelsDevLocaleKey, string>

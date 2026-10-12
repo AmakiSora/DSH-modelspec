@@ -5,6 +5,7 @@
  */
 
 import type { CatalogIndex, IndexedModel } from './catalog.ts'
+import type { EntryBinding } from './bindings.ts'
 import type {
   ModelsDevCandidate, ModelsDevMatch, ModelsDevMatchStrategy, ModelsDevModel, ModelsDevSimilar, ModelsDevSimilarity,
 } from './types.ts'
@@ -163,6 +164,64 @@ export function matchModel(index: CatalogIndex, provider: string, modelId: strin
     strategy: located.strategy,
     ...model === undefined ? {} : { model },
   }
+}
+
+/**
+ * Locate one catalog entry by the exact provider and id a binding names.
+ *
+ * A binding names an entry the way the catalog publishes it, so this is a
+ * lookup rather than a comparison: nothing is folded, nothing is guessed.
+ *
+ * @param index - the validated catalog.
+ * @param providerId - the models.dev provider the binding names.
+ * @param modelId - the model id the binding names.
+ * @returns the entry, or `undefined` when the catalog no longer publishes it.
+ */
+export function resolveEntry(index: CatalogIndex, providerId: string, modelId: string): IndexedModel | undefined {
+  return index.byProvider.get(providerId)?.find(entry => entry.view.id === modelId)
+}
+
+/**
+ * Match one configured model against the catalog, honouring a pinned entry.
+ *
+ * The comparisons all reason from the model id, which is exactly what a
+ * binding exists to overrule: a gateway route can serve a model several
+ * providers publish under one id, and an id that differs from the published one
+ * by a character resolves to nothing at all. A binding names the entry directly.
+ *
+ * A binding the catalog no longer publishes falls back to the comparisons rather
+ * than leaving the model unmatched, so a pinned entry that is renamed upstream
+ * degrades to the automatic answer instead of disappearing.
+ *
+ * @param index - the validated catalog.
+ * @param provider - the deployment's provider route key.
+ * @param modelId - the configured model id.
+ * @param binding - the entry this browser pinned for the model, if any.
+ * @param aliases - deployment provider keys mapped onto models.dev provider keys.
+ * @returns the route's resolved provider key, the located entry, and how it was located.
+ */
+export function matchBound(
+  index: CatalogIndex,
+  provider: string,
+  modelId: string,
+  binding: EntryBinding | undefined,
+  aliases: ProviderAliases,
+): ModelsDevMatch {
+  if (binding !== undefined) {
+    const pinned = resolveEntry(index, binding.providerId, binding.modelId)
+    if (pinned !== undefined) {
+      const routeProviderKey = resolveProviderKey(index, provider, aliases)
+      return {
+        provider,
+        modelId,
+        ...routeProviderKey === undefined ? {} : { routeProviderKey },
+        providerKey: pinned.view.providerId,
+        strategy: 'bound',
+        model: pinned.view,
+      }
+    }
+  }
+  return matchModel(index, provider, modelId, aliases)
 }
 
 /**

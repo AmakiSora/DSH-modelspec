@@ -7,7 +7,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import {
-  Button, IconChevronDownOutlineRegular, IconPlusOutlineRegular, IconRefreshOutlineRegular,
+  Button, IconChevronDownOutlineRegular, IconEditOutlineRegular, IconPlusOutlineRegular, IconRefreshOutlineRegular,
   StateDot, Tag, type StateDotState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -15,6 +15,7 @@ import type { FieldDifference } from './comparison.ts'
 import { FIELD_KEYS, STRATEGY_KEYS } from './locales.ts'
 import type { ModelRowView, ModelsDevFace, ModelsDevState, RouteView, WriteNotice } from './store.ts'
 import { AddModelDialog } from './AddModelDialog.tsx'
+import { EditModelDialog } from './EditModelDialog.tsx'
 import css from './ModelsDevPage.module.css'
 
 /** Full component props assembled by the main slot renderer. */
@@ -38,6 +39,7 @@ function valueText(difference: FieldDifference, side: 'configured' | 'published'
 function noticeText(notice: WriteNotice, t: Translate): string {
   if (notice.kind === 'applied') return t('noticeApplied')
   if (notice.kind === 'added') return t('noticeAdded', { id: notice.id })
+  if (notice.kind === 'saved') return t('noticeSaved')
   if (notice.kind === 'conflict') return t('noticeConflict')
   if (notice.kind === 'readonly') return t('noticeReadonly')
   return t('noticeRefused', { message: notice.message })
@@ -45,7 +47,7 @@ function noticeText(notice: WriteNotice, t: Translate): string {
 
 /** The dot tone one notice renders with. */
 function noticeTone(notice: WriteNotice): StateDotState {
-  if (notice.kind === 'applied' || notice.kind === 'added') return 'done'
+  if (notice.kind === 'applied' || notice.kind === 'added' || notice.kind === 'saved') return 'done'
   return notice.kind === 'conflict' ? 'warning' : 'error'
 }
 
@@ -80,7 +82,7 @@ function matchMetaText(row: ModelRowView, t: Translate): string {
 }
 
 /** One configured model with the catalog's answer about it. */
-function ModelCard({ row, busy, preset, writable, onApply, t }: {
+function ModelCard({ row, busy, preset, writable, onApply, onEdit, t }: {
   readonly row: ModelRowView
   readonly busy: boolean
   /** The route is an adapter preset, so the panel offers no write for it. */
@@ -88,20 +90,29 @@ function ModelCard({ row, busy, preset, writable, onApply, t }: {
   /** The deployment accepts settings writes at all. */
   readonly writable: boolean
   readonly onApply: () => void
+  readonly onEdit: () => void
   readonly t: Translate
 }): ReactNode {
   const { model, match, differences } = row
   const capabilities = capabilityLabels(row, t)
   const price = priceText(row, t)
+  const pinned = match.strategy === 'bound'
   return (
     <li className={css.model}>
       <div className={css.modelHead}>
         <span className={css.modelName}>{model.name ?? model.id}</span>
         {model.name === undefined ? null : <code className={css.modelId}>{model.id}</code>}
         {match.model?.status === 'deprecated' ? <Tag tone="warning">{t('deprecatedTag')}</Tag> : null}
-        {differences.length === 0 || preset ? null : (
-          <Button variant="outline" size="sm" disabled={busy || !writable} onClick={onApply}>{t('applyModel')}</Button>
-        )}
+        {pinned ? <Tag tone="info">{t('modelPinnedTag')}</Tag> : null}
+        <div className={css.modelActions}>
+          {differences.length === 0 || preset ? null : (
+            <Button variant="outline" size="sm" disabled={busy || !writable} onClick={onApply}>{t('applyModel')}</Button>
+          )}
+          <Button variant="ghost" size="sm" icon={<IconEditOutlineRegular size={13} />}
+            disabled={preset || busy || !writable} onClick={onEdit} aria-label={t('editModel')}>
+            {t('editModel')}
+          </Button>
+        </div>
       </div>
       {match.strategy === 'none'
         ? <p className={css.unmatched}>{t('unmatched')}</p>
@@ -141,12 +152,13 @@ function ModelCard({ row, busy, preset, writable, onApply, t }: {
 }
 
 /** One configured provider route and the models it declares. */
-function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, t }: {
+function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, onEditModel, t }: {
   readonly route: RouteView
   readonly state: ModelsDevState
   readonly onApplyRoute: () => void
   readonly onApplyModel: (modelKey: string) => void
   readonly onAddModel: () => void
+  readonly onEditModel: (modelKey: string) => void
   readonly t: Translate
 }): ReactNode {
   const config = route.route
@@ -199,7 +211,8 @@ function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, t }: 
             <ul className={css.models} id={route.key}>
               {route.models.map(row => (
                 <ModelCard key={row.key} row={row} busy={busy} preset={preset} writable={state.writable} t={t}
-                  onApply={() => { onApplyModel(row.key) }} />
+                  onApply={() => { onApplyModel(row.key) }}
+                  onEdit={() => { onEditModel(row.key) }} />
               ))}
             </ul>
           </>
@@ -215,7 +228,7 @@ function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, t }: 
  */
 export function ModelsDevPage({
   t, useModelsDev, ensure, refresh, applyModel, applyRoute, applyAll,
-  addModel, searchModel, searchSimilarModels, submitModel, cancelAdd,
+  pickModel, searchModel, addModel, saveModel, cancelPick,
 }: ModelsDevPageProps): ReactNode {
   useEffect(() => { ensure() }, [ensure])
   const state = useModelsDev(snapshot => snapshot)
@@ -224,7 +237,7 @@ export function ModelsDevPage({
   const differing = state.routes.some(route =>
     !route.route.preset && route.models.some(row => row.differences.length > 0))
   const busy = state.writing.length > 0
-  const addRoute = state.add === null ? undefined : state.routes.find(route => route.key === state.add?.routeKey)
+  const pickerRoute = state.picker === null ? undefined : state.routes.find(route => route.key === state.picker?.routeKey)
   return (
     <div className={css.page}>
       <header className={css.header}>
@@ -275,20 +288,32 @@ export function ModelsDevPage({
           <RouteCard key={route.key} route={route} state={state} t={t}
             onApplyRoute={() => { applyRoute(route.key) }}
             onApplyModel={(modelKey) => { applyModel(route.key, modelKey) }}
-            onAddModel={() => { addModel(route.key) }} />
+            onAddModel={() => { pickModel(route.key, null) }}
+            onEditModel={(modelKey) => { pickModel(route.key, modelKey) }} />
         ))}
       </div>
-      {state.add === null || addRoute === undefined ? null : (
+      {pickerRoute === undefined || state.picker === null ? null : state.picker.modelKey === null ? (
         <AddModelDialog
-          route={addRoute}
-          add={state.add}
+          route={pickerRoute}
+          picker={state.picker}
           writable={state.writable}
-          busy={state.writing.includes(addRoute.route.settingsNs)}
+          busy={state.writing.includes(pickerRoute.route.settingsNs)}
           t={t}
-          onSearch={(modelId) => { searchModel(addRoute.key, modelId) }}
-          onSearchSimilar={(modelId) => { searchSimilarModels(addRoute.key, modelId) }}
-          onSubmit={(entry) => { submitModel(addRoute.key, entry) }}
-          onClose={cancelAdd}
+          onSearch={searchModel}
+          onSubmit={addModel}
+          onClose={cancelPick}
+        />
+      ) : (
+        <EditModelDialog
+          route={pickerRoute}
+          row={pickerRoute.models.find(row => row.key === state.picker?.modelKey) ?? pickerRoute.models[0]!}
+          picker={state.picker}
+          writable={state.writable}
+          busy={state.writing.includes(pickerRoute.route.settingsNs)}
+          t={t}
+          onSearch={searchModel}
+          onSubmit={saveModel}
+          onClose={cancelPick}
         />
       )}
     </div>

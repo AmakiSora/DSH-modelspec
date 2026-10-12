@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ModelsDevMatch, ModelsDevModel } from '../src/client/types.ts'
-import { applyOps, compareModel, isModalityDifference } from '../src/client/comparison.ts'
+import { applyOps, compareModel, editOps, isModalityDifference } from '../src/client/comparison.ts'
 import type { ConfiguredModel, ConfiguredRoute } from '../src/client/configured.ts'
 
 /** One configured model entry. */
@@ -22,6 +22,7 @@ function route(overrides: Partial<ConfiguredRoute> = {}): ConfiguredRoute {
     displayName: 'Acme',
     settingsPath: ['providers', 'acme'],
     revision: 7,
+    arrayLength: 0,
     preset: false,
     models: [],
     ...overrides,
@@ -133,5 +134,69 @@ describe('adoption edits', () => {
 
   it('writes nothing when there is nothing to adopt', () => {
     expect(applyOps(route(), model(), [])).toEqual([])
+  })
+})
+
+describe('editing one configured model', () => {
+  it('writes only the fields the edit changed', () => {
+    const stored = model({ name: 'Acme 1', contextWindow: 4096, maxTokens: 1024 })
+    expect(editOps(route(), stored, {
+      name: 'Acme 1',
+      contextWindow: 4096,
+      maxTokens: 8192,
+      inputModalities: ['text'],
+    })).toEqual([{ op: 'set', path: ['providers', 'acme', 'models', '2', 'maxTokens'], value: 8192 }])
+  })
+
+  it('writes nothing at all when the edit changed nothing', () => {
+    // Repointing a model at another entry without touching a field is the
+    // common case, and it must not restate every field it happens to agree on.
+    const stored = model({ name: 'Acme 1', contextWindow: 4096 })
+    expect(editOps(route(), stored, { name: 'Acme 1', contextWindow: 4096, inputModalities: ['text'] })).toEqual([])
+  })
+
+  it('hands a cleared capacity back to the adapter instead of dropping it', () => {
+    // `unset` is what the settings document answers with: the field returns to
+    // whatever the adapter or composition base declares, which is the only
+    // meaning "unset" has for a value the deployment never wrote itself.
+    const stored = model({ contextWindow: 4096, maxTokens: 1024 })
+    expect(editOps(route(), stored, { name: '', inputModalities: ['text'] })).toEqual([
+      { op: 'unset', path: ['providers', 'acme', 'models', '2', 'contextWindow'] },
+      { op: 'unset', path: ['providers', 'acme', 'models', '2', 'maxTokens'] },
+    ])
+  })
+
+  it('leaves a capacity the model never declared alone when it is cleared', () => {
+    // Unsetting a field that was never set is a no-op the document would carry
+    // into the user layer for nothing.
+    expect(editOps(route(), model(), { name: '', inputModalities: ['text'] })).toEqual([])
+  })
+
+  it('trims a display name and clears one that is only whitespace', () => {
+    const stored = model({ name: 'Acme 1' })
+    expect(editOps(route(), stored, { name: '  Acme One  ', inputModalities: ['text'] }))
+      .toEqual([{ op: 'set', path: ['providers', 'acme', 'models', '2', 'name'], value: 'Acme One' }])
+    expect(editOps(route(), stored, { name: '   ', inputModalities: ['text'] }))
+      .toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '2', 'name'] }])
+  })
+
+  it('sets the first display name a model without one is given', () => {
+    expect(editOps(route(), model(), { name: 'Acme One', inputModalities: ['text'] }))
+      .toEqual([{ op: 'set', path: ['providers', 'acme', 'models', '2', 'name'], value: 'Acme One' }])
+  })
+
+  it('writes modalities under the field this namespace family uses', () => {
+    const stored = model({ inputModalities: ['text'], modalityField: 'inputModalities' })
+    expect(editOps(route(), stored, { name: '', inputModalities: ['text', 'image'] }))
+      .toEqual([{ op: 'set', path: ['providers', 'acme', 'models', '2', 'inputModalities'], value: ['text', 'image'] }])
+  })
+
+  it('writes no modalities when the namespace declares no field for them', () => {
+    const stored = model({ inputModalities: [], modalityField: undefined })
+    expect(editOps(route(), stored, { name: '', inputModalities: ['text', 'image'] })).toEqual([])
+  })
+
+  it('leaves the modalities alone when only their order differs', () => {
+    expect(editOps(route(), model(), { name: '', inputModalities: ['text'] })).toEqual([])
   })
 })

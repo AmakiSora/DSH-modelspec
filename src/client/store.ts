@@ -1,7 +1,8 @@
 /**
  * Panel state for the models.dev page: the configured routes joined with what
- * the catalog says about them, and the writes that adopt the catalog values.
- * The Host Remote reads and the settings writes are bound here, so a component
+ * the catalog says about them, the writes that adopt the catalog values, and
+ * the picker that adds or edits one model. The Host Remote reads, the settings
+ * writes, and the browser-local entry bindings are bound here, so a component
  * receives plain data and callbacks only.
  */
 
@@ -9,12 +10,15 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { LlmConfigurableProvider, SettingsDescribeValue, SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import { addModelOps, newModelProblem, type NewModelEntry } from './add-model.ts'
+import { bindingHost, bindingKey, readBindings, writeBinding, type EntryBinding } from './bindings.ts'
 import { ModelsDevCatalog } from './catalog-service.ts'
 import type { ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevOption } from './types.ts'
-import { applyOps, compareModel, type FieldDifference } from './comparison.ts'
+import { applyOps, compareModel, editOps, type EditedModel, type FieldDifference } from './comparison.ts'
 import { readRoutes, type ConfiguredModel, type ConfiguredRoute } from './configured.ts'
 
 export type { NewModelEntry, NewModelProblem, NewModelTemplate } from './add-model.ts'
+export type { EditedModel } from './comparison.ts'
+export type { EntryBinding } from './bindings.ts'
 
 /** One configured model with the catalog's answer and the differences it implies. */
 export interface ModelRowView {
@@ -44,6 +48,8 @@ export type WriteNotice =
   | { readonly kind: 'applied' }
   /** One new model reached the namespace. */
   | { readonly kind: 'added'; readonly id: string }
+  /** One edited model reached the namespace. */
+  | { readonly kind: 'saved' }
   /** Another writer changed the namespace since the panel read it. */
   | { readonly kind: 'conflict' }
   /** The namespace refused the edit and said why. */
@@ -51,11 +57,13 @@ export type WriteNotice =
   /** The profile does not accept settings writes. */
   | { readonly kind: 'readonly' }
 
-/** What the add-model dialog is waiting on. */
-export interface AddModelState {
-  /** Route the model is being added to. */
+/** What the model picker is waiting on. */
+export interface ModelPickerState {
+  /** Route the model belongs to, or is being added to. */
   readonly routeKey: string
-  /** Model id the dialog last asked about. */
+  /** The model being edited, or `null` when a model is being added. */
+  readonly modelKey: string | null
+  /** Model id the picker last asked about. */
   readonly modelId: string
   /** Whether the last search was the fuzzy one rather than the comparisons. */
   readonly fuzzy: boolean
@@ -85,8 +93,8 @@ export interface ModelsDevState {
   readonly writing: readonly string[]
   /** Outcome of the last write, or `null`. */
   readonly notice: WriteNotice | null
-  /** The open add-model dialog, or `null` when none is. */
-  readonly add: AddModelState | null
+  /** The open picker, or `null` when none is. */
+  readonly picker: ModelPickerState | null
 }
 
 /** The data sources and callbacks the panel's slot registration injects. */
@@ -103,16 +111,16 @@ export interface ModelsDevFace {
   readonly applyRoute: (routeKey: string) => void
   /** Adopt every differing model of every route, one settings write per namespace. */
   readonly applyAll: () => void
-  /** Open the add-model dialog for one route. */
-  readonly addModel: (routeKey: string) => void
-  /** Ask the catalog which entries answer to one model id on one route. */
-  readonly searchModel: (routeKey: string, modelId: string) => void
-  /** Ask the catalog which entries came close to one model id on one route. */
-  readonly searchSimilarModels: (routeKey: string, modelId: string) => void
-  /** Append one new model entry to a route's namespace. */
-  readonly submitModel: (routeKey: string, entry: NewModelEntry) => void
-  /** Close the add-model dialog without writing. */
-  readonly cancelAdd: () => void
+  /** Open the picker for a route, or for one model inside it. */
+  readonly pickModel: (routeKey: string, modelKey: string | null) => void
+  /** Ask the catalog about one model id for the open picker. */
+  readonly searchModel: (modelId: string, fuzzy: boolean) => void
+  /** Append a new model entry to the route the open picker belongs to. */
+  readonly addModel: (entry: NewModelEntry) => void
+  /** Write one edited model back, against the entry source it should follow. */
+  readonly saveModel: (edited: EditedModel, binding: EntryBinding | undefined) => void
+  /** Close the picker without writing. */
+  readonly cancelPick: () => void
 }
 
 /** One settings write grouped by the namespace it belongs to. */
@@ -185,9 +193,16 @@ export class ModelsDevController {
   /**
    * Distinguishes overlapping candidate searches. A read and a search supersede
    * each other for different reasons — one replaces the panel's rows, the other
-   * replaces the dialog's list — so they do not share one counter.
+   * replaces the picker's list — so they do not share one counter.
    */
   private searches = 0
+
+  /**
+   * Host the entry bindings beside this panel belong to, read once: a panel
+   * cannot outlive the window it was served from, and re-reading per comparison
+   * would let a storage the browser refuses to answer cost every read.
+   */
+  private readonly host: string = bindingHost()
 
   /** Whether this controller has been unloaded. */
   private disposed: boolean = false
@@ -206,7 +221,7 @@ export class ModelsDevController {
       routes: [],
       writing: [],
       notice: null,
-      add: null,
+      picker: null,
     })
   }
 
@@ -255,72 +270,76 @@ export class ModelsDevController {
       applyModel: (routeKey, modelKey) => { void this.apply(this.plan(routeKey, modelKey)) },
       applyRoute: (routeKey) => { void this.apply(this.plan(routeKey, null)) },
       applyAll: () => { void this.apply(this.plan(null, null)) },
-      addModel: (routeKey) => { this.openAdd(routeKey) },
-      searchModel: (routeKey, modelId) => { void this.search(routeKey, modelId, false) },
-      searchSimilarModels: (routeKey, modelId) => { void this.search(routeKey, modelId, true) },
-      submitModel: (routeKey, entry) => { void this.submit(routeKey, entry) },
-      cancelAdd: () => { this.patch({ add: null }) },
+      pickModel: (routeKey, modelKey) => { this.open(routeKey, modelKey) },
+      searchModel: (modelId, fuzzy) => { void this.search(modelId, fuzzy) },
+      addModel: (entry) => { void this.append(entry) },
+      saveModel: (edited, binding) => { void this.save(edited, binding) },
+      cancelPick: () => { this.patch({ picker: null }) },
     }
   }
 
   /**
-   * Open the add-model dialog for one route.
+   * Open the picker for a route, or for one model inside it.
    *
    * An adapter preset brings its own profile, so the panel compares it and never
    * writes it; that holds for a model added to it as much as for a corrected
-   * value on one it already carries.
+   * value on one it already carries. The picker is the only place either is
+   * offered, so refusing it here refuses both at once.
    *
-   * @param routeKey - the route the model is being added to.
+   * @param routeKey - the route the model belongs to, or is being added to.
+   * @param modelKey - the model being edited, or `null` to add one.
    */
-  private openAdd(routeKey: string): void {
+  private open(routeKey: string, modelKey: string | null): void {
     const state = this.getSnapshot()
     const route = state.routes.find(row => row.key === routeKey)
     if (route === undefined || route.route.preset) return
+    if (modelKey !== null && !route.models.some(row => row.key === modelKey)) return
     if (!state.writable) {
       this.patch({ notice: { kind: 'readonly' } })
       return
     }
-    this.patch({ add: { routeKey, modelId: '', fuzzy: false, searching: false, candidates: [], error: null } })
+    this.patch({
+      picker: { routeKey, modelKey, modelId: '', fuzzy: false, searching: false, candidates: [], error: null },
+    })
   }
 
   /**
-   * Ask the catalog which entries answer to one model id on one route.
+   * Ask the catalog which entries answer to the model id the open picker holds.
    *
-   * The dialog asks on every keystroke, so a search supersedes the one before
-   * it and the one before that is dropped rather than published over a longer
-   * id. The catalog read behind the answer is shared and cached by the service,
-   * so a keystroke that arrives mid-read waits on it instead of starting another.
+   * The picker asks on every keystroke, so a search supersedes the one before it
+   * and the one before that is dropped rather than published over a longer id.
+   * The catalog read behind the answer is shared and cached by the service, so a
+   * keystroke that arrives mid-read waits on it instead of starting another.
    *
-   * @param routeKey - the route the model is being added to.
    * @param modelId - the id as typed, untrimmed.
    * @param fuzzy - whether to search for ids that merely came close.
    */
-  private async search(routeKey: string, modelId: string, fuzzy: boolean): Promise<void> {
+  private async search(modelId: string, fuzzy: boolean): Promise<void> {
     const state = this.getSnapshot()
-    const open = state.add
-    if (open === null || open.routeKey !== routeKey) return
-    const route = state.routes.find(row => row.key === routeKey)
+    const open = state.picker
+    if (open === null) return
+    const route = state.routes.find(row => row.key === open.routeKey)
     if (route === undefined) return
     const wanted = modelId.trim()
     if (wanted === '') {
-      this.patch({ add: { ...open, modelId, fuzzy, searching: false, candidates: [], error: null } })
+      this.patch({ picker: { ...open, modelId, fuzzy, searching: false, candidates: [], error: null } })
       return
     }
     const search = ++this.searches
-    this.patch({ add: { ...open, modelId, fuzzy, searching: true, candidates: [], error: null } })
+    this.patch({ picker: { ...open, modelId, fuzzy, searching: true, candidates: [], error: null } })
     try {
       const candidates = fuzzy
         ? await this.catalog.similar(route.route.provider, wanted)
         : await this.catalog.candidates(route.route.provider, wanted)
-      const add = this.staleSearch(routeKey, search) ? null : this.getSnapshot().add
-      if (add === null) return
-      this.patch({ add: { ...add, searching: false, candidates, error: null } })
+      const picker = this.staleSearch(open.routeKey, search) ? null : this.getSnapshot().picker
+      if (picker === null) return
+      this.patch({ picker: { ...picker, searching: false, candidates, error: null } })
     } catch (error: unknown) {
-      const add = this.staleSearch(routeKey, search) ? null : this.getSnapshot().add
-      if (add === null) return
-      // A catalog that cannot be read leaves the template in place rather than
-      // an empty dialog: the model is still addable, just without its values.
-      this.patch({ add: { ...add, searching: false, candidates: [], error: messageOf(error) } })
+      const picker = this.staleSearch(open.routeKey, search) ? null : this.getSnapshot().picker
+      if (picker === null) return
+      // A catalog that cannot be read leaves the values in place rather than an
+      // empty picker: the model is still editable, just without its entry.
+      this.patch({ picker: { ...picker, searching: false, candidates: [], error: messageOf(error) } })
     }
   }
 
@@ -333,25 +352,74 @@ export class ModelsDevController {
    * dialog checks the same rules before enabling its confirm button, and a
    * second caller must not reach the namespace with them either.
    *
-   * @param routeKey - the route the model is being added to.
    * @param entry - the values to write.
    */
-  private async submit(routeKey: string, entry: NewModelEntry): Promise<void> {
+  private async append(entry: NewModelEntry): Promise<void> {
     const state = this.getSnapshot()
-    const route = state.routes.find(row => row.key === routeKey)
+    const picker = state.picker
+    if (picker === null || picker.modelKey !== null) return
+    const route = state.routes.find(row => row.key === picker.routeKey)
     if (route === undefined || route.route.preset) return
     if (!state.writable) {
-      this.patch({ add: null, notice: { kind: 'readonly' } })
+      this.patch({ picker: null, notice: { kind: 'readonly' } })
       return
     }
     if (newModelProblem(route.route, entry) !== undefined) return
-    const ops = addModelOps(route.route, entry)
-    this.patch({ writing: [route.route.settingsNs], notice: null })
+    await this.write(
+      route.route,
+      addModelOps(route.route, entry),
+      { picker: null, notice: { kind: 'added', id: entry.id.trim() } },
+    )
+  }
+
+  /**
+   * Write one edited model back, against the entry source it should follow.
+   *
+   * The binding is filed first and answers nothing by itself: it decides what the
+   * panel compares the model against, while the values come from the edit. A
+   * reader who repointed the model at another entry and changed no values writes
+   * nothing at all, and the panel reloads to show the new comparison either way.
+   *
+   * @param edited - the values the entry should end up holding.
+   * @param binding - the catalog entry to pin, or `undefined` to follow the id again.
+   */
+  private async save(edited: EditedModel, binding: EntryBinding | undefined): Promise<void> {
+    const state = this.getSnapshot()
+    const picker = state.picker
+    if (picker === null || picker.modelKey === null) return
+    const route = state.routes.find(row => row.key === picker.routeKey)
+    const row = route?.models.find(model => model.key === picker.modelKey)
+    if (route === undefined || row === undefined || route.route.preset) return
+    if (!state.writable) {
+      this.patch({ picker: null, notice: { kind: 'readonly' } })
+      return
+    }
+    writeBinding(this.host, bindingKey(route.key, row.model.id), binding)
+    const ops = editOps(route.route, row.model, edited)
+    if (ops.length === 0) {
+      this.patch({ picker: null })
+      await this.load(false)
+      return
+    }
+    await this.write(route.route, ops, { picker: null, notice: { kind: 'saved' } })
+  }
+
+  /**
+   * Run one settings write, report what it did, and reload afterwards so the
+   * panel shows what the deployment now stores.
+   *
+   * The write's own outcome is a fact even when the Host broadcast it and a
+   * re-read took over underneath: the read counter would drop this settlement
+   * and leave the picker open over a model that has already changed.
+   *
+   * @param route - the route whose namespace is being written.
+   * @param ops - the edits to make.
+   * @param done - what to publish once the namespace accepted them.
+   */
+  private async write(route: ConfiguredRoute, ops: SettingsPathOpView[], done: Partial<ModelsDevState>): Promise<void> {
+    this.patch({ writing: [route.settingsNs], notice: null })
     try {
-      const response = await this.ctx.remote.settings.mutate(route.route.settingsNs, ops, route.route.revision)
-      // The write's own outcome is a fact even when the Host broadcast it and a
-      // re-read took over underneath: the read counter would drop this
-      // settlement and leave the dialog open over a model that is now stored.
+      const response = await this.ctx.remote.settings.mutate(route.settingsNs, ops, route.revision)
       if (this.unloaded) return
       if (!response.ok) {
         this.patch({
@@ -361,7 +429,7 @@ export class ModelsDevController {
         })
         return
       }
-      this.patch({ add: null, notice: { kind: 'added', id: entry.id.trim() } })
+      this.patch(done)
       await this.load(false)
     } finally {
       this.patch({ writing: [] })
@@ -449,8 +517,19 @@ export class ModelsDevController {
     try {
       const [directory, described] = await Promise.all([this.directory(), this.namespaces()])
       const routes = readRoutes(directory, described)
-      const lookups: ModelsDevLookup[] = routes.flatMap(route =>
-        route.models.map(model => ({ provider: route.provider, modelId: model.id })))
+      const bindings = readBindings(this.host)
+      // One lookup per configured model, each carrying the entry this browser
+      // pinned for it, so a binding never costs a second Remote round. A route
+      // key plus a model id names the model, so the same key the binding is
+      // filed under is the one this read has to rebuild.
+      const lookups: ModelsDevLookup[] = routes.flatMap(route => route.models.map((model) => {
+        const binding = bindings.get(bindingKey(routeKeyOf(route), model.id))
+        return {
+          provider: route.provider,
+          modelId: model.id,
+          ...binding === undefined ? {} : { binding },
+        }
+      }))
       // A deployment with no configured model has nothing to compare, so its
       // catalog is left unread; an explicit refresh reads it regardless.
       const compare = force || lookups.length > 0
@@ -498,12 +577,12 @@ export class ModelsDevController {
 
   /**
    * Whether one candidate search settled too late to publish, either because a
-   * newer keystroke replaced it or because its dialog is no longer open.
+   * newer keystroke replaced it or because its picker is no longer open.
    */
   private staleSearch(routeKey: string, search: number): boolean {
     if (this.unloaded || search !== this.searches) return true
-    const add = this.getSnapshot().add
-    return add === null || add.routeKey !== routeKey
+    const picker = this.getSnapshot().picker
+    return picker === null || picker.routeKey !== routeKey
   }
 
   /**

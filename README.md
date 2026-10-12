@@ -7,8 +7,9 @@ actually configured, and writes the differences back.
 The panel is the **Model specs** entry in the left sidebar. One card per configured provider
 route, one row per model inside it, and the stored value beside the published one wherever
 they disagree. You can adopt one model's values, one route's, or the whole page at once.
-Each route also carries **Add model**, which looks a model up in the catalog and appends it to
-that route's configuration.
+Each route carries **Add model**, which looks a model up in the catalog and appends it to
+that route, and each model row carries **Edit**, which changes what one configured model
+stores and which catalog entry it is compared against.
 
 ## What it does
 
@@ -18,7 +19,8 @@ that route's configuration.
 - **Never writes a preset.** A route the adapter ships itself (`deepseek-official`,
   `deepseek-account`, pi-ai's own catalog routes) is compared but never written. The rule is
   the directory's own `declared` answer, not a list of names, so it tracks whatever the
-  installed DSH considers a preset. A preset route offers no **Add model** button either.
+  installed DSH considers a preset. A preset route offers no **Add model** or **Edit** button
+  either.
 - **Shows how confident each match is.** An entry located by identical model id looks
   different from one reached after dropping a vendor prefix or ignoring punctuation; the page
   names the comparison that found it.
@@ -57,6 +59,30 @@ The write itself is one path-addressed `set` at the first index past the end of 
 length rather than the number of rows the panel shows, so an entry the panel could not read is
 never overwritten. The namespace revision guards it, and a refusal leaves the dialog open with
 what you typed.
+
+## Editing a model
+
+**Edit** at the right of a model row opens the same picker over one model that already exists.
+The two changes it offers are one decision: choose which catalog entry the model follows, and
+edit the values it stores. Repointing without taking that entry's values would leave the row
+reporting a difference you just refused to adopt, so choosing an entry fills the fields from it
+exactly as it does when adding.
+
+**The entry source is a panel preference, not deployment configuration.** The settings document
+validates every write against the adapter's own schema, which declares no field for it, so a
+binding cannot be stored in the namespace and is kept in this browser's local storage instead —
+keyed by host, route, and model id, so two deployments on one machine stay apart and reordering
+a route's models does not re-point anything. It decides what the model is compared against and
+never what is written. A pinned entry the catalog no longer publishes falls back to the
+automatic match rather than leaving the model unmatched, and a row whose entry was pinned says
+so beside it.
+
+**Clearing a field hands it back to the adapter.** Adopting a catalog entry can only ever write
+a value the catalog publishes; an edit can also clear one, and the settings document answers
+that with an `unset` — the field returns to whatever the adapter or composition base declares,
+which is the only meaning "unset" has for a value the deployment may never have written itself.
+Only fields the edit actually changed are written, so repointing a model at another entry
+without touching a field writes nothing at all.
 
 ## Requirements
 
@@ -136,10 +162,13 @@ src/client/catalog.ts        models.dev document parsing and indexing (zod)
 src/client/match.ts          configured route/model → catalog entry, and the fuzzy search
 src/client/configured.ts     settings namespaces → configured routes and models
 src/client/comparison.ts     differences between stored and published values; write ops
+src/client/bindings.ts       which catalog entry each model follows, kept in this browser
 src/client/add-model.ts      default template, the appending edit, and the draft rules
 src/client/store.ts          panel state, write planning, write execution
 src/client/ModelsDevPage.tsx the page
+src/client/ModelPicker.tsx   the id field, candidate chooser, and field block both dialogs share
 src/client/AddModelDialog.tsx the add-model dialog
+src/client/EditModelDialog.tsx the edit-model dialog
 src/client/locales.ts        zh + en dictionaries
-tests/                       173 specs
+tests/                       216 specs
 ```

@@ -6,7 +6,7 @@
  */
 
 import { catalogView, indexCatalog, type CatalogIndex } from './catalog.ts'
-import { matchCandidates, matchModel, similarCandidates, DEFAULT_SIMILAR_LIMIT, type ProviderAliases } from './match.ts'
+import { matchBound, matchCandidates, matchModel, similarCandidates, DEFAULT_SIMILAR_LIMIT, type ProviderAliases } from './match.ts'
 import type { ModelsDevCandidate, ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevSimilar } from './types.ts'
 
 /** The address models.dev publishes its machine-readable catalog at. */
@@ -72,13 +72,20 @@ export class ModelsDevCatalog {
 
   /**
    * Match configured provider routes and models against the catalog.
-   * @param lookups - provider route keys and model ids, answered in the given order.
+   *
+   * A lookup carrying a binding is answered by that entry, so one call still
+   * covers the whole page whether or not this browser pinned any of its models.
+   *
+   * @param lookups - provider route keys, model ids, and any pinned entries.
    * @returns one result per lookup, carrying the resolved provider keys and the located entry.
    * @throws {ModelsDevError} when the document cannot be read or parsed.
    */
   async match(lookups: readonly ModelsDevLookup[]): Promise<ModelsDevMatch[]> {
     const index = await this.index()
-    return lookups.map(lookup => matchModel(index, lookup.provider, lookup.modelId, this.providerAliases))
+    return lookups.map(lookup =>
+      lookup.binding === undefined
+        ? matchModel(index, lookup.provider, lookup.modelId, this.providerAliases)
+        : matchBound(index, lookup.provider, lookup.modelId, lookup.binding, this.providerAliases))
   }
 
   /**

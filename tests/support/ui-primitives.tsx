@@ -85,6 +85,11 @@ export function IconPlusOutlineRegular({ size = 16, className, ...rest }: IconPr
   return <svg width={size} height={size} className={className} {...rest} />
 }
 
+/** The pencil glyph on the edit-model button. */
+export function IconEditOutlineRegular({ size = 16, className, ...rest }: IconProps): ReactNode {
+  return <svg width={size} height={size} className={className} {...rest} />
+}
+
 /** Props the page passes to the shared text field. */
 export interface InputProps {
   readonly icon?: ReactNode

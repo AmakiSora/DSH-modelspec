@@ -182,6 +182,16 @@
   gap: 8px;
 }
 
+/* The row's controls stay pinned to its right edge as the name beside them
+   ellipsizes, so "edit this model" is always in the same place. */
+.modelActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-inline-start: auto;
+}
+
 .modelName {
   font-size: 13px;
   font-weight: 600;

@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { indexCatalog } from '../src/client/catalog.ts'
-import { matchCandidates, matchModel, resolveProviderKey, similarCandidates } from '../src/client/match.ts'
+import { matchBound, matchCandidates, matchModel, resolveProviderKey, similarCandidates } from '../src/client/match.ts'
 
 /** Index one small catalog with the given providers and models. */
 function indexOf(providers: Record<string, Record<string, Record<string, unknown>>>): ReturnType<typeof indexCatalog> {
@@ -275,5 +275,52 @@ describe('fuzzy matching', () => {
     const similar = similarCandidates(index, 'openai', 'gpt-4p', {}, 1)
     expect(similar).toHaveLength(1)
     expect(similarCandidates(index, 'openai', 'gpt', {}, 2)).toHaveLength(2)
+  })
+})
+
+describe('a pinned entry', () => {
+  const index = indexOf({
+    openai: { 'gpt-4o': entry('gpt-4o', { limit: { context: 128000 } }) },
+    azure: { 'gpt-4o': entry('gpt-4o', { limit: { context: 64000 } }) },
+  })
+
+  it('answers with the entry it names, whatever the id would have resolved to', () => {
+    // The route resolves to `openai`, and the id resolves there too, but the
+    // reader pinned the other provider's entry — that is the whole point.
+    expect(matchModel(index, 'openai', 'gpt-4o', {})).toMatchObject({ providerKey: 'openai', strategy: 'exact' })
+    expect(matchBound(index, 'openai', 'gpt-4o', { providerId: 'azure', modelId: 'gpt-4o' }, {}))
+      .toMatchObject({ provider: 'openai', providerKey: 'azure', strategy: 'bound' })
+  })
+
+  it('reports the route provider key it would have resolved on its own', () => {
+    expect(matchBound(index, 'openai', 'gpt-4o', { providerId: 'azure', modelId: 'gpt-4o' }, {}))
+      .toMatchObject({ routeProviderKey: 'openai' })
+  })
+
+  it('answers for an id no comparison would have resolved at all', () => {
+    // A gateway route whose stored id differs from every published spelling.
+    expect(matchModel(index, 'my-gateway', 'internal-build-7', {})).toMatchObject({ strategy: 'none' })
+    expect(matchBound(index, 'my-gateway', 'internal-build-7', { providerId: 'openai', modelId: 'gpt-4o' }, {}))
+      .toMatchObject({ strategy: 'bound', model: { id: 'gpt-4o' } })
+  })
+
+  it('falls back to the comparisons when the catalog no longer publishes it', () => {
+    // A pinned entry renamed upstream degrades to the automatic answer instead
+    // of leaving the model unmatched.
+    expect(matchBound(index, 'openai', 'gpt-4o', { providerId: 'azure', modelId: 'retired' }, {}))
+      .toMatchObject({ strategy: 'exact', providerKey: 'openai' })
+    // Without a resolved provider the fallback is a whole-document search, so
+    // which provider answers is the document's own order rather than a promise.
+    expect(matchBound(index, 'my-gateway', 'gpt-4o', { providerId: 'azure', modelId: 'retired' }, {}))
+      .toMatchObject({ strategy: 'exact', model: { id: 'gpt-4o' } })
+  })
+
+  it('falls back when the named provider is gone entirely', () => {
+    expect(matchBound(index, 'openai', 'gpt-4o', { providerId: 'retired-gateway', modelId: 'gpt-4o' }, {}))
+      .toMatchObject({ strategy: 'exact', providerKey: 'openai' })
+  })
+
+  it('matches the comparisons exactly when nothing is pinned', () => {
+    expect(matchBound(index, 'openai', 'gpt-4o', undefined, {})).toEqual(matchModel(index, 'openai', 'gpt-4o', {}))
   })
 })

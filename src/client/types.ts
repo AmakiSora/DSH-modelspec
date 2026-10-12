@@ -1,5 +1,7 @@
 /** Client-safe views of the models.dev catalog and of one configured model matched against it. */
 
+import type { EntryBinding } from './bindings.ts'
+
 /** Input modalities a DSH model entry can declare, mirroring the adapters' `ModelModality`. */
 export type ModelsDevModality = 'text' | 'image'
 
@@ -81,6 +83,8 @@ export type ModelsDevMatchStrategy =
   | 'bare'
   /** Ignoring case, punctuation, and a trailing release date. */
   | 'normalized'
+  /** The entry this browser pinned for the model, rather than one it resolved. */
+  | 'bound'
   /** No entry in the catalog matched. */
   | 'none'
 
@@ -124,6 +128,12 @@ export interface ModelsDevLookup {
   provider: string
   /** Model id the deployment configured. */
   modelId: string
+  /**
+   * The entry this browser pinned for the model. It answers the lookup outright
+   * while the catalog still publishes it, because the reader chose it over every
+   * comparison this plugin can make on the id alone.
+   */
+  binding?: EntryBinding
 }
 
 /** What the catalog says about one configured provider route and model. */
