@@ -120,9 +120,9 @@ export function CandidatePicker(props: CandidatePickerProps): ReactNode {
   return (
     <>
       <div className={css.addIdRow}>
-        <label className={css.addFieldName} htmlFor="model-aid-add-id">{t('addModelId')}</label>
+        <label className={css.addFieldName} htmlFor="dsh-modelspec-add-id">{t('addModelId')}</label>
         <Input
-          id="model-aid-add-id"
+          id="dsh-modelspec-add-id"
           value={modelId}
           placeholder={t('addModelIdPlaceholder')}
           disabled={disabled}
