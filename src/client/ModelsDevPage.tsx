@@ -8,7 +8,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   Button, IconChevronDownOutlineRegular, IconEditOutlineRegular, IconPlusOutlineRegular, IconRefreshOutlineRegular,
-  StateDot, Tag, type StateDotState,
+  IconTrashOutlineRegular, StateDot, Tag, type StateDotState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { FieldDifference } from './comparison.ts'
@@ -16,6 +16,7 @@ import { FIELD_KEYS, STRATEGY_KEYS } from './locales.ts'
 import type { ModelRowView, ModelsDevFace, ModelsDevState, RouteView, WriteNotice } from './store.ts'
 import { AddModelDialog } from './AddModelDialog.tsx'
 import { EditModelDialog } from './EditModelDialog.tsx'
+import { RemoveModelDialog } from './RemoveModelDialog.tsx'
 import css from './ModelsDevPage.module.css'
 
 /** Full component props assembled by the main slot renderer. */
@@ -40,6 +41,7 @@ function noticeText(notice: WriteNotice, t: Translate): string {
   if (notice.kind === 'applied') return t('noticeApplied')
   if (notice.kind === 'added') return t('noticeAdded', { id: notice.id })
   if (notice.kind === 'saved') return t('noticeSaved')
+  if (notice.kind === 'removed') return t('noticeRemoved', { id: notice.id })
   if (notice.kind === 'conflict') return t('noticeConflict')
   if (notice.kind === 'readonly') return t('noticeReadonly')
   return t('noticeRefused', { message: notice.message })
@@ -47,7 +49,7 @@ function noticeText(notice: WriteNotice, t: Translate): string {
 
 /** The dot tone one notice renders with. */
 function noticeTone(notice: WriteNotice): StateDotState {
-  if (notice.kind === 'applied' || notice.kind === 'added' || notice.kind === 'saved') return 'done'
+  if (notice.kind !== 'conflict' && notice.kind !== 'refused' && notice.kind !== 'readonly') return 'done'
   return notice.kind === 'conflict' ? 'warning' : 'error'
 }
 
@@ -82,7 +84,7 @@ function matchMetaText(row: ModelRowView, t: Translate): string {
 }
 
 /** One configured model with the catalog's answer about it. */
-function ModelCard({ row, busy, preset, writable, onApply, onEdit, t }: {
+function ModelCard({ row, busy, preset, writable, onApply, onEdit, onRemove, t }: {
   readonly row: ModelRowView
   readonly busy: boolean
   /** The route is an adapter preset, so the panel offers no write for it. */
@@ -91,6 +93,7 @@ function ModelCard({ row, busy, preset, writable, onApply, onEdit, t }: {
   readonly writable: boolean
   readonly onApply: () => void
   readonly onEdit: () => void
+  readonly onRemove: () => void
   readonly t: Translate
 }): ReactNode {
   const { model, match, differences } = row
@@ -112,6 +115,16 @@ function ModelCard({ row, busy, preset, writable, onApply, onEdit, t }: {
             disabled={preset || busy || !writable} onClick={onEdit} aria-label={t('editModel')}>
             {t('editModel')}
           </Button>
+          {/* Removal has no shortcut back from here, so it stays an icon: the
+              confirmation beside it is where the decision is actually made. The
+              class rides the wrapper because a CSS-module key is possibly
+              undefined, which the shared button's exact-optional prop refuses. */}
+          <span className={css.danger}>
+            <Button variant="ghost" size="sm" icon={<IconTrashOutlineRegular size={13} />}
+              disabled={preset || busy || !writable} onClick={onRemove} aria-label={t('removeModel')}>
+              {t('removeModel')}
+            </Button>
+          </span>
         </div>
       </div>
       {match.strategy === 'none'
@@ -152,13 +165,14 @@ function ModelCard({ row, busy, preset, writable, onApply, onEdit, t }: {
 }
 
 /** One configured provider route and the models it declares. */
-function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, onEditModel, t }: {
+function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, onEditModel, onRemoveModel, t }: {
   readonly route: RouteView
   readonly state: ModelsDevState
   readonly onApplyRoute: () => void
   readonly onApplyModel: (modelKey: string) => void
   readonly onAddModel: () => void
   readonly onEditModel: (modelKey: string) => void
+  readonly onRemoveModel: (modelKey: string) => void
   readonly t: Translate
 }): ReactNode {
   const config = route.route
@@ -212,7 +226,8 @@ function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, onEdi
               {route.models.map(row => (
                 <ModelCard key={row.key} row={row} busy={busy} preset={preset} writable={state.writable} t={t}
                   onApply={() => { onApplyModel(row.key) }}
-                  onEdit={() => { onEditModel(row.key) }} />
+                  onEdit={() => { onEditModel(row.key) }}
+                  onRemove={() => { onRemoveModel(row.key) }} />
               ))}
             </ul>
           </>
@@ -228,7 +243,7 @@ function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, onEdi
  */
 export function ModelsDevPage({
   t, useModelsDev, ensure, refresh, applyModel, applyRoute, applyAll,
-  pickModel, searchModel, addModel, saveModel, cancelPick,
+  pickModel, searchModel, addModel, saveModel, removeModel, cancelPick,
 }: ModelsDevPageProps): ReactNode {
   useEffect(() => { ensure() }, [ensure])
   const state = useModelsDev(snapshot => snapshot)
@@ -238,6 +253,11 @@ export function ModelsDevPage({
     !route.route.preset && route.models.some(row => row.differences.length > 0))
   const busy = state.writing.length > 0
   const pickerRoute = state.picker === null ? undefined : state.routes.find(route => route.key === state.picker?.routeKey)
+  // The model a removal is waiting on. Kept here rather than in the panel state
+  // because it is a question the page asks itself, not an answer the Host gave.
+  const [removing, setRemoving] = useState<{ routeKey: string; modelKey: string } | null>(null)
+  const removingRoute = removing === null ? undefined : state.routes.find(route => route.key === removing.routeKey)
+  const removingRow = removingRoute?.models.find(row => row.key === removing?.modelKey)
   return (
     <div className={css.page}>
       <header className={css.header}>
@@ -289,7 +309,8 @@ export function ModelsDevPage({
             onApplyRoute={() => { applyRoute(route.key) }}
             onApplyModel={(modelKey) => { applyModel(route.key, modelKey) }}
             onAddModel={() => { pickModel(route.key, null) }}
-            onEditModel={(modelKey) => { pickModel(route.key, modelKey) }} />
+            onEditModel={(modelKey) => { pickModel(route.key, modelKey) }}
+            onRemoveModel={(modelKey) => { setRemoving({ routeKey: route.key, modelKey }) }} />
         ))}
       </div>
       {pickerRoute === undefined || state.picker === null ? null : state.picker.modelKey === null ? (
@@ -314,6 +335,20 @@ export function ModelsDevPage({
           onSearch={searchModel}
           onSubmit={saveModel}
           onClose={cancelPick}
+        />
+      )}
+      {removingRoute === undefined || removingRow === undefined || removing === null ? null : (
+        <RemoveModelDialog
+          route={removingRoute}
+          modelId={removingRow.model.id}
+          last={removingRoute.models.length === 1}
+          busy={state.writing.includes(removingRoute.route.settingsNs)}
+          t={t}
+          onConfirm={() => {
+            removeModel(removing.routeKey, removing.modelKey)
+            setRemoving(null)
+          }}
+          onClose={() => { setRemoving(null) }}
         />
       )}
     </div>

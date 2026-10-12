@@ -192,6 +192,14 @@
   margin-inline-start: auto;
 }
 
+/* Removal is the one control here with no shortcut back, so it is toned as a
+   loss rather than as another edit. The wrapper owns the colour so the shared
+   button keeps its own styling. */
+.danger {
+  display: inline-flex;
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .modelName {
   font-size: 13px;
   font-weight: 600;

@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ModelsDevMatch, ModelsDevModel } from '../src/client/types.ts'
-import { applyOps, compareModel, editOps, isModalityDifference } from '../src/client/comparison.ts'
+import { applyOps, compareModel, editOps, isModalityDifference, removeModelOps } from '../src/client/comparison.ts'
 import type { ConfiguredModel, ConfiguredRoute } from '../src/client/configured.ts'
 
 /** One configured model entry. */
@@ -198,5 +198,26 @@ describe('editing one configured model', () => {
 
   it('leaves the modalities alone when only their order differs', () => {
     expect(editOps(route(), model(), { name: '', inputModalities: ['text'] })).toEqual([])
+  })
+})
+
+describe('removing one configured model', () => {
+  it('unsets the array index, which is how the document takes an element out', () => {
+    // The settings document removes an array element by unsetting its index, so
+    // there is no "delete" verb to use here.
+    expect(removeModelOps(route(), model({ index: 2 })))
+      .toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '2'] }])
+  })
+
+  it('addresses the entry under the route path', () => {
+    expect(removeModelOps(route({ settingsPath: [] }), model({ index: 0 })))
+      .toEqual([{ op: 'unset', path: ['models', '0'] }])
+  })
+
+  it('removes exactly one entry whatever the index', () => {
+    for (const index of [0, 1, 7]) {
+      expect(removeModelOps(route(), model({ index }))).toHaveLength(1)
+      expect(removeModelOps(route(), model({ index }))[0]?.path.at(-1)).toBe(String(index))
+    }
   })
 })

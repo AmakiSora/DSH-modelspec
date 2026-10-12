@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { makeTranslate } from './support/translate.ts'
 import type { ModelsDevState } from '../src/client/store.ts'
 import type { ModelsDevOption, ModelsDevSimilarity } from '../src/client/types.ts'
@@ -110,6 +110,7 @@ function props(state: ModelsDevState): ModelsDevPageProps {
     searchModel: vi.fn(),
     addModel: vi.fn(),
     saveModel: vi.fn(),
+    removeModel: vi.fn(),
     cancelPick: vi.fn(),
   } as unknown as ModelsDevPageProps
 }
@@ -834,5 +835,99 @@ describe('editing a configured model', () => {
   it('reports the edit that was saved', () => {
     panel({ ...ready(), notice: { kind: 'saved' } })
     expect(screen.getByText('The model configuration was updated.')).toBeTruthy()
+  })
+})
+
+/** The ready state with two models on the first route. */
+function twoModels(): ModelsDevState {
+  const route = readyRoute()
+  const first = route.models[0]!
+  const second: typeof first = { ...first, key: 'llm-pi-ai/acme/1', model: { ...first.model, index: 1, id: 'acme-2' } }
+  return { ...ready(), routes: [{ ...route, route: { ...route.route, arrayLength: 2 }, models: [first, second] }] }
+}
+
+/** The confirm button inside the removal dialog, which shares the row's name. */
+function confirm(): HTMLElement {
+  return within(screen.getByRole('dialog', { name: 'Remove model' }))
+    .getByRole('button', { name: 'Remove' })
+}
+
+describe('removing a configured model', () => {
+  afterEach(cleanup)
+
+  it('asks before it removes anything', () => {
+    const injected = props(ready())
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(injected.removeModel).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Remove model' })).toBeTruthy()
+  })
+
+  it('names the model and the provider it would be taken out of', () => {
+    const injected = props(ready())
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    const description = screen.getByRole('dialog', { name: 'Remove model' }).textContent
+    expect(description).toContain('acme-1')
+    expect(description).toContain('Acme')
+  })
+
+  it('warns that removing the only model takes the whole provider off the panel', () => {
+    panel(ready())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(screen.getByText(/stop appearing on the panel/)).toBeTruthy()
+    expect(screen.queryByText(/shift forward/)).toBeNull()
+  })
+
+  it('says the models behind it shift, when the route keeps others', () => {
+    panel(twoModels())
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0] as HTMLElement)
+    expect(screen.getByText(/shift forward/)).toBeTruthy()
+    expect(screen.queryByText(/stop appearing on the panel/)).toBeNull()
+  })
+
+  it('removes the model the reader confirmed, and nothing else', () => {
+    const injected = props(ready())
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(confirm())
+    expect(injected.removeModel).toHaveBeenCalledWith('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    expect(injected.removeModel).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes the right one of two, whichever row was pressed', () => {
+    const injected = props(twoModels())
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[1] as HTMLElement)
+    fireEvent.click(confirm())
+    expect(injected.removeModel).toHaveBeenCalledWith('llm-pi-ai/acme', 'llm-pi-ai/acme/1')
+  })
+
+  it('removes nothing when the reader backs out', () => {
+    const injected = props(ready())
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(injected.removeModel).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Remove model' })).toBeNull()
+  })
+
+  it('offers no removal for a preset row, or where writes are refused', () => {
+    const preset = readyRoute()
+    panel(withRoute({ ...preset, route: { ...preset.route, preset: true } }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Remove' }).disabled).toBe(true)
+    cleanup()
+    panel({ ...ready(), writable: false })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Remove' }).disabled).toBe(true)
+  })
+
+  it('offers no removal while a write is in flight', () => {
+    panel({ ...ready(), writing: ['llm-pi-ai'] })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Remove' }).disabled).toBe(true)
+  })
+
+  it('reports the model that was removed', () => {
+    panel({ ...ready(), notice: { kind: 'removed', id: 'acme-1' } })
+    expect(screen.getByText('The model acme-1 was removed.')).toBeTruthy()
   })
 })

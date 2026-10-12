@@ -13,7 +13,7 @@ import { addModelOps, newModelProblem, type NewModelEntry } from './add-model.ts
 import { bindingHost, bindingKey, readBindings, writeBinding, type EntryBinding } from './bindings.ts'
 import { ModelsDevCatalog } from './catalog-service.ts'
 import type { ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevOption } from './types.ts'
-import { applyOps, compareModel, editOps, type EditedModel, type FieldDifference } from './comparison.ts'
+import { applyOps, compareModel, editOps, removeModelOps, type EditedModel, type FieldDifference } from './comparison.ts'
 import { readRoutes, type ConfiguredModel, type ConfiguredRoute } from './configured.ts'
 
 export type { NewModelEntry, NewModelProblem, NewModelTemplate } from './add-model.ts'
@@ -50,6 +50,8 @@ export type WriteNotice =
   | { readonly kind: 'added'; readonly id: string }
   /** One edited model reached the namespace. */
   | { readonly kind: 'saved' }
+  /** One model was removed from the namespace. */
+  | { readonly kind: 'removed'; readonly id: string }
   /** Another writer changed the namespace since the panel read it. */
   | { readonly kind: 'conflict' }
   /** The namespace refused the edit and said why. */
@@ -119,6 +121,8 @@ export interface ModelsDevFace {
   readonly addModel: (entry: NewModelEntry) => void
   /** Write one edited model back, against the entry source it should follow. */
   readonly saveModel: (edited: EditedModel, binding: EntryBinding | undefined) => void
+  /** Remove one model from a route's namespace. */
+  readonly removeModel: (routeKey: string, modelKey: string) => void
   /** Close the picker without writing. */
   readonly cancelPick: () => void
 }
@@ -274,6 +278,7 @@ export class ModelsDevController {
       searchModel: (modelId, fuzzy) => { void this.search(modelId, fuzzy) },
       addModel: (entry) => { void this.append(entry) },
       saveModel: (edited, binding) => { void this.save(edited, binding) },
+      removeModel: (routeKey, modelKey) => { void this.remove(routeKey, modelKey) },
       cancelPick: () => { this.patch({ picker: null }) },
     }
   }
@@ -402,6 +407,33 @@ export class ModelsDevController {
       return
     }
     await this.write(route.route, ops, { picker: null, notice: { kind: 'saved' } })
+  }
+
+  /**
+   * Remove one model from a route's namespace.
+   *
+   * The reader confirms this in the page; the panel's own rules still apply, so
+   * an adapter preset and a read-only deployment refuse it as firmly as they
+   * refuse every other write. The entry binding goes with the model it described
+   * rather than lingering as hidden state for an id the route no longer stores.
+   *
+   * @param routeKey - the route the model belongs to.
+   * @param modelKey - the model being removed.
+   */
+  private async remove(routeKey: string, modelKey: string): Promise<void> {
+    const state = this.getSnapshot()
+    const route = state.routes.find(row => row.key === routeKey)
+    const row = route?.models.find(model => model.key === modelKey)
+    if (route === undefined || row === undefined || route.route.preset) return
+    if (!state.writable) {
+      this.patch({ notice: { kind: 'readonly' } })
+      return
+    }
+    writeBinding(this.host, bindingKey(route.key, row.model.id), undefined)
+    await this.write(route.route, removeModelOps(route.route, row.model), {
+      picker: null,
+      notice: { kind: 'removed', id: row.model.id },
+    })
   }
 
   /**

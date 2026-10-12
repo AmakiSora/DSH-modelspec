@@ -1,7 +1,7 @@
 /**
  * Comparing one configured model against its catalog entry, and turning the
- * differences into the path-addressed edits that adopt them. Only a value the
- * catalog publishes is ever written: an unpublished field leaves the
+ * result into the path-addressed edits the namespace accepts. Only a value the
+ * catalog publishes is ever adopted: an unpublished field leaves the
  * deployment's own configuration alone.
  */
 
@@ -117,6 +117,22 @@ export function editOps(route: ConfiguredRoute, model: ConfiguredModel, edited: 
     ops.push({ op: 'set', path: [...base, model.modalityField], value: [...edited.inputModalities] })
   }
   return ops
+}
+
+/**
+ * Build the edit that removes one model from a route.
+ *
+ * The settings document removes an array element by unsetting its index — the
+ * one edit that both takes the entry out and shifts the ones behind it, which
+ * is why the panel reads its rows again afterwards rather than trusting the
+ * index it held when the reader pressed the button.
+ *
+ * @param route - the provider route whose namespace holds the models.
+ * @param model - the configured model entry, whose index is its write address.
+ * @returns one `unset` op addressing that index.
+ */
+export function removeModelOps(route: ConfiguredRoute, model: ConfiguredModel): SettingsPathOpView[] {
+  return [{ op: 'unset', path: [...route.settingsPath, 'models', String(model.index)] }]
 }
 
 /**

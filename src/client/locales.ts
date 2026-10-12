@@ -94,6 +94,14 @@ export const zh = {
   editModelSourceAuto: '当前条目来源：{entry}（按模型 ID 自动匹配）',
   editModelSourcePinned: '当前条目来源：{entry}（已手动指定）',
   modelPinnedTag: '已指定来源',
+  noticeRemoved: '已删除模型 {id}。',
+  removeModel: '删除',
+  removeModelTitle: '删除模型',
+  removeModelDescription: '从「{provider}」中删除 {model}。',
+  removeModelConfirm: '删除',
+  removeModelKeeps: '将从该供应商的配置中移除模型 {model}。',
+  removeModelLastRoute: '这是该供应商的最后一个模型，删除后该供应商将不再显示在面板上。',
+  removeModelShiftsRoute: '其后的模型会前移一位，面板会在写入后重新读取配置。',
 } satisfies Record<string, string>
 
 /** models.dev panel locale key union. */
@@ -212,4 +220,12 @@ export const en = {
   editModelSourceAuto: 'Entry source: {entry} (matched from the model id)',
   editModelSourcePinned: 'Entry source: {entry} (pinned by you)',
   modelPinnedTag: 'Pinned',
+  noticeRemoved: 'The model {id} was removed.',
+  removeModel: 'Remove',
+  removeModelTitle: 'Remove model',
+  removeModelDescription: 'Remove {model} from {provider}.',
+  removeModelConfirm: 'Remove',
+  removeModelKeeps: 'The model {model} will be taken out of that provider configuration.',
+  removeModelLastRoute: 'It is the only model this provider stores, so the provider will stop appearing on the panel.',
+  removeModelShiftsRoute: 'The models behind it shift forward, and the panel reads the configuration again afterwards.',
 } satisfies Record<ModelsDevLocaleKey, string>

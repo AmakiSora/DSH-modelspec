@@ -8,8 +8,9 @@ The panel is the **Model specs** entry in the left sidebar. One card per configu
 route, one row per model inside it, and the stored value beside the published one wherever
 they disagree. You can adopt one model's values, one route's, or the whole page at once.
 Each route carries **Add model**, which looks a model up in the catalog and appends it to
-that route, and each model row carries **Edit**, which changes what one configured model
-stores and which catalog entry it is compared against.
+that route, and each model row carries **Edit** and **Remove**, which change what one
+configured model stores, which catalog entry it is compared against, or whether it is
+configured at all.
 
 ## What it does
 
@@ -83,6 +84,21 @@ that with an `unset` — the field returns to whatever the adapter or compositio
 which is the only meaning "unset" has for a value the deployment may never have written itself.
 Only fields the edit actually changed are written, so repointing a model at another entry
 without touching a field writes nothing at all.
+
+## Removing a model
+
+**Remove** is the one control with no shortcut back: it takes the entry out of the
+deployment's configuration, and putting it back means adding it again. It is an icon rather
+than a text button, and it asks first — the confirmation names the model, says whether the
+provider keeps other models, and warns that removing a provider's only model takes the
+provider off the panel entirely.
+
+The settings document has no delete verb, so the write is an `unset` at the array index —
+the one edit that takes an element out and shifts the ones behind it. The panel therefore
+re-reads its rows afterwards instead of trusting the index it held when the button was
+pressed, and the namespace revision guards the write against another window having reordered
+the array underneath. The entry binding goes with the model it described rather than lingering
+as hidden state for an id the route no longer stores.
 
 ## Requirements
 
@@ -169,6 +185,7 @@ src/client/ModelsDevPage.tsx the page
 src/client/ModelPicker.tsx   the id field, candidate chooser, and field block both dialogs share
 src/client/AddModelDialog.tsx the add-model dialog
 src/client/EditModelDialog.tsx the edit-model dialog
+src/client/RemoveModelDialog.tsx the removal confirmation
 src/client/locales.ts        zh + en dictionaries
-tests/                       216 specs
+tests/                       235 specs
 ```

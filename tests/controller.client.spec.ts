@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { LlmConfigurableProvider, SettingsDescribeValue, SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import { ModelsDevCatalog, ModelsDevError } from '../src/client/catalog-service.ts'
+import { bindingHost, bindingKey, readBindings } from '../src/client/bindings.ts'
 import type { ModelsDevCandidate, ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevSimilar } from '../src/client/types.ts'
 import { ModelsDevController } from '../src/client/store.ts'
 import type { NewModelEntry } from '../src/client/add-model.ts'
@@ -929,5 +930,115 @@ describe('panel controller edits a model', () => {
     face.saveModel({ name: '', inputModalities: ['text'] }, undefined)
     await settle()
     expect(seat.writes).toHaveLength(1)
+  })
+})
+
+describe('panel controller removes a model', () => {
+  /** One route holding two models, so an index shift is observable. */
+  function removeBench(script: Partial<Script> = {}): Bench {
+    return bench({
+      directory: [entry()],
+      described: described([view('llm-pi-ai', {
+        providers: { acme: { models: [{ id: 'acme-1', input: ['text'] }, { id: 'acme-2', input: ['text'] }] } },
+      })]),
+      matches: [matchFor('acme', 'acme-1'), matchFor('acme', 'acme-2')],
+      ...script,
+    })
+  }
+
+  it('unsets the index the model holds', async () => {
+    const { panel, writes } = removeBench()
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/1')
+    await settle()
+    expect(writes).toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '1'] }])
+    expect(panel.getSnapshot()).toMatchObject({ notice: { kind: 'removed', id: 'acme-2' } })
+    expect(panel.getSnapshot().writing).toEqual([])
+  })
+
+  it('removes the first model by its own index, not by the row order it reads back', async () => {
+    const { panel, writes } = removeBench()
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    await settle()
+    expect(writes).toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '0'] }])
+  })
+
+  it('keeps the editor open on nothing and says so when the namespace refuses', async () => {
+    const seat = removeBench()
+    seat.panel.inject().ensure()
+    await settle()
+    seat.script.mutate = () => ({
+      ok: false,
+      error: new RemoteError('settings/rejected', 'the profile rejects this section', { ns: 'llm-pi-ai' }),
+    })
+    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    await settle()
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'the profile rejects this section' })
+  })
+
+  it('reports a stale revision as a conflict rather than removing the wrong entry', async () => {
+    const seat = removeBench()
+    seat.panel.inject().ensure()
+    await settle()
+    seat.script.mutate = () => ({
+      ok: false,
+      error: new RemoteError('settings/conflict', 'the namespace moved', { ns: 'llm-pi-ai', expected: 1, actual: 2 }),
+    })
+    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/1')
+    await settle()
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'conflict' })
+  })
+
+  it('removes nothing from a preset route, a model it never read, or a read-only one', async () => {
+    const preset = bench({
+      directory: [{ provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek-api-key', settingsPath: [] }],
+      described: described([view('llm-deepseek-api-key', { models: [{ id: 'deepseek-v4-pro', contextWindow: 1000000 }] })]),
+      matches: [matchFor('deepseek-official', 'deepseek-v4-pro', { contextWindow: 131072 })],
+    })
+    preset.panel.inject().ensure()
+    await settle()
+    preset.panel.inject().removeModel('llm-deepseek-api-key/deepseek-official', 'llm-deepseek-api-key/deepseek-official/0')
+    await settle()
+    expect(preset.writes).toEqual([])
+
+    const readonly = removeBench({ described: described(
+      [view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1', input: ['text'] }] } } })],
+      false,
+    ) })
+    readonly.panel.inject().ensure()
+    await settle()
+    readonly.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    await settle()
+    expect(readonly.writes).toEqual([])
+    expect(readonly.panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
+
+    const seat = removeBench()
+    seat.panel.inject().ensure()
+    await settle()
+    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/9')
+    await settle()
+    expect(seat.writes).toEqual([])
+  })
+
+  it('takes the entry binding with the model it described', async () => {
+    const seat = removeBench()
+    const face = seat.panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    face.saveModel({ name: '', contextWindow: undefined, maxTokens: undefined, inputModalities: ['text'] },
+      { providerId: 'azure', modelId: 'acme-1' })
+    await settle()
+    expect(seat.panel.getSnapshot().routes[0]?.models[0]?.match.strategy).toBe('bound')
+    face.removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    await settle()
+    // The read after the removal no longer has that model to follow, so a
+    // binding left behind would be hidden state for an id the route dropped.
+    expect(readBindings(bindingHost()).has(bindingKey('llm-pi-ai/acme', 'acme-1'))).toBe(false)
   })
 })
