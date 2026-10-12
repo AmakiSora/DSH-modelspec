@@ -1,8 +1,13 @@
-# model-aid
+# DSH-modelspec
 
 A [dsh](https://github.com/deepseek-ai/deepseek-harness) web-client plugin. It reads the
 [models.dev](https://models.dev) catalog, compares it against the models this deployment
 actually configured, and writes the differences back.
+
+> The repository is **DSH-modelspec**; the npm package and the installed plugin are
+> **`model-aid`**. The shorter name is what a profile's `package.json`, its
+> `cordis.patch.yml` and the staged directory all use, so it is kept as it is in every
+> install instruction below.
 
 The panel is the **Model specs** entry in the left sidebar. One card per configured provider
 route, one row per model inside it, and the stored value beside the published one wherever
@@ -11,6 +16,8 @@ Each route carries **Add model**, which looks a model up in the catalog and appe
 that route, and each model row carries **Edit** and **Remove**, which change what one
 configured model stores, which catalog entry it is compared against, or whether it is
 configured at all.
+
+See [CHANGELOG.md](CHANGELOG.md) for what has changed in each release.
 
 ## What it does
 
@@ -168,6 +175,29 @@ contract this project cannot change from the outside:
 The `model-aid-bundle-purity` tsdown plugin rejects any other `@deepseek-ai/` value import at
 build time. Cross-plugin behaviour goes through Cordis services and slots, not imports.
 
+## Releasing
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/),
+which is what makes the next version mechanical to read off the history:
+
+| Commit | Version bump |
+| --- | --- |
+| `fix: …` | PATCH |
+| `feat: …` | MINOR |
+| `feat!: …` or a `BREAKING CHANGE:` footer | MAJOR |
+
+Other types (`docs:`, `refactor:`, `test:`, `chore:`, …) carry no bump on their own. A scope
+may follow the type — `feat(picker): …` — to name the part of the codebase a change belongs
+to.
+
+Each release then gets a section in [CHANGELOG.md](CHANGELOG.md) written for a reader rather
+than generated from the log: the `Added` / `Changed` / `Fixed` / `Removed` categories from
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), an ISO date, and a `vX.Y.Z` tag.
+
+The project is on `0.y.z`, which under [Semantic Versioning](https://semver.org/) means the
+public API is not promised stable yet — fitting for a plugin built against a `0.2.1-alpha`
+of dsh. `1.0.0` is the release to make once the panel's behaviour has been relied on.
+
 ## Layout
 
 ```
@@ -188,4 +218,5 @@ src/client/EditModelDialog.tsx the edit-model dialog
 src/client/RemoveModelDialog.tsx the removal confirmation
 src/client/locales.ts        zh + en dictionaries
 tests/                       235 specs
+CHANGELOG.md                 one section per release, written for a reader
 ```
