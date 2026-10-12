@@ -25,7 +25,7 @@ function source(relative: string): string {
 }
 
 /** The package manifest, which is the source of the name and the version. */
-const manifest = JSON.parse(source('package.json')) as { name: string; version: string }
+const manifest = JSON.parse(source('package.json')) as { name: string; version: string; license?: string }
 
 /** The changelog, as written. */
 const changelog = source('CHANGELOG.md')
@@ -87,5 +87,14 @@ describe('release metadata', () => {
     // 1.0.0 is a decision to support the panel's behaviour, not a number the
     // next feature is allowed to roll over into by accident.
     expect(manifest.version.startsWith('0.')).toBe(true)
+  })
+
+  it('ships the text of the license the manifest declares', () => {
+    // A manifest field grants nothing on its own: with no LICENSE file the
+    // default is all rights reserved, which is the opposite of what the field
+    // says, and a public repository is exactly where that matters.
+    expect(manifest.license).toBe('MIT')
+    expect(source('LICENSE')).toContain('MIT License')
+    expect(source('LICENSE')).toMatch(/Copyright \(c\) \d{4} \S/)
   })
 })
