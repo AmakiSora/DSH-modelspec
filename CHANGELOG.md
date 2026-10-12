@@ -35,6 +35,6 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - 235 specs over the matching, the write paths, the browser-local bindings, and the
   rendered page.
 
-[Unreleased]: https://github.com/OWNER/DSH-modelspec/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/OWNER/DSH-modelspec/releases/tag/v0.1.0
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.1.0
 [models.dev]: https://models.dev

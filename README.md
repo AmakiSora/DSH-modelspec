@@ -12,7 +12,8 @@ that route, and each model row carries **Edit** and **Remove**, which change wha
 configured model stores, which catalog entry it is compared against, or whether it is
 configured at all.
 
-See [CHANGELOG.md](CHANGELOG.md) for what has changed in each release.
+Repository: [AmakiSora/DSH-modelspec](https://github.com/AmakiSora/DSH-modelspec). See
+[CHANGELOG.md](CHANGELOG.md) for what has changed in each release.
 
 ## What it does
 
