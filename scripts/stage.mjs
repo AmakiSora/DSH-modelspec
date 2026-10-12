@@ -7,19 +7,23 @@
  * the browser bundle inlines everything the shell does not share, so a
  * dependency list here would only invite a second copy of a shared runtime.
  *
- * The name and the directory agree because both appear in a profile's own
- * configuration: the manifest name is the dependency key a profile writes, and
- * the directory is the path that key points at. Renaming one without the other
- * leaves a profile referring to a package that is not there.
+ * The staged manifest is a re-emission of the package manifest, so both the name
+ * and the version are read from package.json rather than restated here: a number
+ * that changes every release has no business living in two files. The directory
+ * follows the name because it is the path a profile's dependency key points at.
+ *
+ * The bundle's own registration id is *not* read from here. It is declared in
+ * tsdown.config.ts, and `tests/release.spec.ts` fails if the two disagree.
  *
  * Usage: node scripts/stage.mjs [--out <dir>]
  */
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const NAME = 'dsh-modelspec'
+const PACKAGE = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
+const NAME = PACKAGE.name
 const OUT = process.argv.includes('--out')
   ? resolve(process.argv[process.argv.indexOf('--out') + 1])
   : join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.dsh', 'plugins', NAME)
@@ -30,7 +34,7 @@ const ARTIFACTS = ['lib/index.js', 'lib/client.js', 'lib/client.js.map']
 /** The staged manifest: the entry points, the client manifest, and nothing else. */
 const MANIFEST = {
   name: NAME,
-  version: '0.1.0',
+  version: PACKAGE.version,
   private: true,
   type: 'module',
   main: 'lib/index.js',
