@@ -8,7 +8,9 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { LlmConfigurableProvider, SettingsDescribeValue, SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
+import type {
+  LlmConfigurableProvider, LlmDiscoveredModel, SettingsDescribeValue, SettingsPathOpView,
+} from '@deepseek-ai/dsh-api-remotes/client'
 import { addModelOps, newModelProblem, type NewModelEntry } from './add-model.ts'
 import { bindingHost, bindingKey, readBindings, writeBinding, type EntryBinding } from './bindings.ts'
 import { ModelsDevCatalog } from './catalog-service.ts'
@@ -75,6 +77,15 @@ export interface ModelPickerState {
   readonly candidates: readonly ModelsDevOption[]
   /** Why the last search failed, or `null`. */
   readonly error: string | null
+  /** Whether the route's own endpoint is being asked which models it serves. */
+  readonly discovering: boolean
+  /**
+   * What that endpoint answered, or `null` while it has not answered yet. An
+   * empty list is an answer too: the endpoint reported no models.
+   */
+  readonly discovered: readonly LlmDiscoveredModel[] | null
+  /** Why the last interrogation failed, or `null`. */
+  readonly discoverError: string | null
 }
 
 /** Everything the page renders. */
@@ -117,6 +128,8 @@ export interface ModelsDevFace {
   readonly pickModel: (routeKey: string, modelKey: string | null) => void
   /** Ask the catalog about one model id for the open picker. */
   readonly searchModel: (modelId: string, fuzzy: boolean) => void
+  /** Ask the picker's route which models its own endpoint serves. */
+  readonly discoverModels: () => void
   /** Append a new model entry to the route the open picker belongs to. */
   readonly addModel: (entry: NewModelEntry) => void
   /** Write one edited model back, against the entry source it should follow. */
@@ -202,6 +215,13 @@ export class ModelsDevController {
   private searches = 0
 
   /**
+   * Distinguishes overlapping endpoint interrogations, for the same reason:
+   * two presses of the fetch button are two answers, and only the newer one
+   * describes what the endpoint currently serves.
+   */
+  private discoveries = 0
+
+  /**
    * Host the entry bindings beside this panel belong to, read once: a panel
    * cannot outlive the window it was served from, and re-reading per comparison
    * would let a storage the browser refuses to answer cost every read.
@@ -276,6 +296,7 @@ export class ModelsDevController {
       applyAll: () => { void this.apply(this.plan(null, null)) },
       pickModel: (routeKey, modelKey) => { this.open(routeKey, modelKey) },
       searchModel: (modelId, fuzzy) => { void this.search(modelId, fuzzy) },
+      discoverModels: () => { void this.discover() },
       addModel: (entry) => { void this.append(entry) },
       saveModel: (edited, binding) => { void this.save(edited, binding) },
       removeModel: (routeKey, modelKey) => { void this.remove(routeKey, modelKey) },
@@ -304,7 +325,18 @@ export class ModelsDevController {
       return
     }
     this.patch({
-      picker: { routeKey, modelKey, modelId: '', fuzzy: false, searching: false, candidates: [], error: null },
+      picker: {
+        routeKey,
+        modelKey,
+        modelId: '',
+        fuzzy: false,
+        searching: false,
+        candidates: [],
+        error: null,
+        discovering: false,
+        discovered: null,
+        discoverError: null,
+      },
     })
   }
 
@@ -345,6 +377,47 @@ export class ModelsDevController {
       // A catalog that cannot be read leaves the values in place rather than an
       // empty picker: the model is still editable, just without its entry.
       this.patch({ picker: { ...picker, searching: false, candidates: [], error: messageOf(error) } })
+    }
+  }
+
+  /**
+   * Ask the open picker's route which models its own endpoint serves.
+   *
+   * The question is answered on the Host, not here: the adapter either knows
+   * the route's models from its own catalog or interrogates the endpoint, and
+   * it is the Host that holds the route's credential and can reach an address
+   * a browser cannot. This panel sends the route's own endpoint facts and gets
+   * back ids it may offer — nothing is read from the catalog here, and nothing
+   * is written anywhere.
+   *
+   * A second press supersedes the first, exactly as two searches do, because
+   * the reader is asking the endpoint what it serves now.
+   */
+  private async discover(): Promise<void> {
+    const state = this.getSnapshot()
+    const open = state.picker
+    if (open === null) return
+    const route = state.routes.find(row => row.key === open.routeKey)
+    if (route === undefined) return
+    const discovery = ++this.discoveries
+    this.patch({ picker: { ...open, discovering: true, discovered: null, discoverError: null } })
+    try {
+      const response = await this.ctx.remote.llm.discoverModels(route.route.settingsNs, {
+        provider: route.route.provider,
+        ...route.route.baseURL === undefined ? {} : { baseURL: route.route.baseURL },
+        ...route.route.api === undefined ? {} : { api: route.route.api },
+      })
+      const picker = this.staleDiscovery(open.routeKey, discovery) ? null : this.getSnapshot().picker
+      if (picker === null) return
+      this.patch({
+        picker: response.ok
+          ? { ...picker, discovering: false, discovered: response.value, discoverError: null }
+          : { ...picker, discovering: false, discovered: null, discoverError: response.error.message },
+      })
+    } catch (error: unknown) {
+      const picker = this.staleDiscovery(open.routeKey, discovery) ? null : this.getSnapshot().picker
+      if (picker === null) return
+      this.patch({ picker: { ...picker, discovering: false, discovered: null, discoverError: messageOf(error) } })
     }
   }
 
@@ -613,6 +686,16 @@ export class ModelsDevController {
    */
   private staleSearch(routeKey: string, search: number): boolean {
     if (this.unloaded || search !== this.searches) return true
+    const picker = this.getSnapshot().picker
+    return picker === null || picker.routeKey !== routeKey
+  }
+
+  /**
+   * Whether one endpoint interrogation settled too late to publish, either
+   * because a newer press replaced it or because its dialog is no longer open.
+   */
+  private staleDiscovery(routeKey: string, discovery: number): boolean {
+    if (this.unloaded || discovery !== this.discoveries) return true
     const picker = this.getSnapshot().picker
     return picker === null || picker.routeKey !== routeKey
   }

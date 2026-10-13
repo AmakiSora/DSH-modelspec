@@ -39,6 +39,15 @@ export interface ConfiguredRoute {
   readonly displayName: string
   /** Path from the namespace root to the route profile; empty when the section is the profile. */
   readonly settingsPath: readonly string[]
+  /**
+   * Endpoint the route's models live at, when its profile declares one.
+   * A route the adapter's own catalog describes needs none; a gateway or a
+   * self-hosted server is the one that declares it, and the only one whose
+   * models have to be asked for over the wire.
+   */
+  readonly baseURL?: string
+  /** Wire protocol the route speaks, when its profile declares one. */
+  readonly api?: string
   /** Namespace revision every write carries. */
   readonly revision: number
   /**
@@ -82,6 +91,37 @@ function atPath(root: JsonValue | undefined, path: readonly string[]): JsonValue
 /** Keep only a positive integer capacity, matching what both adapters accept. */
 function capacity(value: JsonValue | undefined): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+/** Keep only a non-empty string, the shape both endpoint facts are declared in. */
+function text(value: JsonValue | undefined): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/** The endpoint facts a route profile declares, when it declares any. */
+interface RouteEndpoint {
+  /** Endpoint this route's models live at. */
+  readonly baseURL?: string
+  /** Wire protocol this route speaks. */
+  readonly api?: string
+}
+
+/**
+ * Read the endpoint one route profile declares.
+ *
+ * Both fields belong to the adapter rather than to this panel, and both are
+ * optional: an adapter answers for a route its own catalog describes without
+ * reaching the network at all. This reads them so the panel can hand its
+ * interrogation the same facts the route itself is configured with.
+ */
+function routeEndpoint(profile: JsonValue | undefined): RouteEndpoint {
+  const record = asRecord(profile)
+  const baseURL = text(record?.['baseURL'])
+  const api = text(record?.['api'])
+  return {
+    ...baseURL === undefined ? {} : { baseURL },
+    ...api === undefined ? {} : { api },
+  }
 }
 
 /** Keep only the modalities a DSH model entry can declare. */
@@ -182,13 +222,16 @@ export function readRoutes(
   for (const entry of directory) {
     const view: SettingsNamespaceView | undefined = views.get(entry.settingsNs)
     if (view === undefined) continue
-    const { arrayLength, models } = profileModels(atPath(view.value, entry.settingsPath))
+    const profile = atPath(view.value, entry.settingsPath)
+    const { arrayLength, models } = profileModels(profile)
     if (models.length === 0) continue
+    const endpoint = routeEndpoint(profile)
     configured.push({
       settingsNs: entry.settingsNs,
       provider: entry.provider,
       displayName: entry.displayName,
       settingsPath: entry.settingsPath,
+      ...endpoint,
       revision: view.revision,
       arrayLength: userArrayLength(view, entry.settingsPath, arrayLength),
       preset: entry.declared !== true,

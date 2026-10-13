@@ -12,6 +12,7 @@
 import { type KeyboardEvent, type ReactNode } from 'react'
 import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { STRATEGY_KEYS, type ModelsDevLocaleKey } from './locales.ts'
 import type { ModelsDevOption, ModelsDevSimilarity } from './types.ts'
 import type { ModelPickerState } from './store.ts'
@@ -78,6 +79,46 @@ export function fieldsFrom(option: ModelsDevOption | undefined): PickerFields {
   }
 }
 
+/**
+ * Read what one endpoint disclosed about a model into the fields.
+ *
+ * A listing endpoint commonly reports an id and nothing else, so a field it
+ * stayed silent about is left empty rather than filled with a guess — the
+ * adapter's own default applies there, exactly as it does for a draft typed by
+ * hand. A name that only repeats the id is dropped for the same reason: it
+ * says nothing the id does not, and storing it would look like a decision.
+ *
+ * @param model - one model the route's endpoint reported.
+ * @returns the values the fields hold.
+ */
+export function upstreamFields(model: LlmDiscoveredModel): PickerFields {
+  const named = model.name === undefined || model.name === model.id ? '' : model.name
+  return {
+    name: named,
+    context: model.contextWindow === undefined ? '' : String(model.contextWindow),
+    output: model.maxTokens === undefined ? '' : String(model.maxTokens),
+    image: model.inputModalities?.includes('image') ?? false,
+  }
+}
+
+/** The upstream interrogation the add dialog offers beside the id field. */
+export interface UpstreamProbe {
+  /** Whether the route's endpoint is being asked. */
+  readonly discovering: boolean
+  /** What it answered, or `null` while it has not answered yet. */
+  readonly models: readonly LlmDiscoveredModel[] | null
+  /** Why it could not be asked, or `null`. */
+  readonly error: string | null
+  /** Id the reader took from that answer, or `null` while none is taken. */
+  readonly chosen: string | null
+  /** Ids the route already configures, which cannot be added again. */
+  readonly configured: ReadonlySet<string>
+  /** Ask the route's endpoint which models it serves. */
+  readonly onFetch: () => void
+  /** Take one reported model as the one being added. */
+  readonly onChoose: (model: LlmDiscoveredModel) => void
+}
+
 /** Everything the candidate chooser needs from the dialog around it. */
 export interface CandidatePickerProps {
   /** The pending search, as the controller published it. */
@@ -94,6 +135,8 @@ export interface CandidatePickerProps {
   readonly onSearch: (modelId: string) => void
   /** Search the catalog for the ids that came close to it. */
   readonly onSearchSimilar: (modelId: string) => void
+  /** The route's own endpoint, when the dialog offers to ask it. */
+  readonly upstream?: UpstreamProbe
   /** Choose one entry. */
   readonly onChoose: (option: ModelsDevOption) => void
   /** Confirm from the id field; Enter submits rather than inserting a break. */
@@ -110,7 +153,7 @@ export interface CandidatePickerProps {
  * @returns the block element.
  */
 export function CandidatePicker(props: CandidatePickerProps): ReactNode {
-  const { picker, active, disabled, t, modelId, onSearch, onSearchSimilar, onChoose, onConfirm } = props
+  const { picker, active, disabled, t, modelId, onSearch, onSearchSimilar, onChoose, onConfirm, upstream } = props
   const fuzzy = picker.fuzzy
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key !== 'Enter') return
@@ -138,6 +181,59 @@ export function CandidatePicker(props: CandidatePickerProps): ReactNode {
           {t('addModelFuzzy')}
         </Button>
       </div>
+      {/* The other way a reader who does not know the id can answer the same
+          question: ask the route's own endpoint, on the Host, what it serves.
+          It gets a row of its own because its label is a sentence and the id
+          row already shares itself with one button. Offered only where a dialog
+          asks for it — the editor chooses the entry of a model that already
+          exists, not a model to create. */}
+      {upstream === undefined ? null : (
+        <div className={css.addUpstream}>
+          <Button variant="outline" size="sm" disabled={disabled || upstream.discovering}
+            onClick={upstream.onFetch}>
+            {upstream.discovering ? t('addUpstreamFetching') : t('addUpstreamFetch')}
+          </Button>
+        </div>
+      )}
+      {upstream === undefined || upstream.error === null
+        ? null
+        : <p className={css.diagnostic} role="alert">{t('addUpstreamFailed', { message: upstream.error })}</p>}
+      {upstream === undefined || upstream.models === null ? null : upstream.models.length === 0 ? (
+        <p className={css.meta}>{t('addUpstreamEmpty')}</p>
+      ) : (
+        <>
+          <p className={css.meta}>{t('addUpstreamFound', { count: String(upstream.models.length) })}</p>
+          <ul className={css.candidates} role="radiogroup"
+            aria-label={t('addUpstreamFound', { count: String(upstream.models.length) })}>
+            {upstream.models.map((model) => {
+              const known = upstream.configured.has(model.id)
+              return (
+                <li key={model.id}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={upstream.chosen === model.id}
+                    className={css.candidate}
+                    disabled={disabled || known}
+                    onClick={() => { upstream.onChoose(model) }}
+                  >
+                    <span className={css.candidateName}>{model.name ?? model.id}</span>
+                    <code className={css.candidateId}>{model.id}</code>
+                    <span className={css.candidateMeta}>
+                      {known
+                        ? t('addUpstreamConfigured')
+                        : t('addModelCandidateLimits', {
+                          context: capacityText(model.contextWindow),
+                          output: capacityText(model.maxTokens),
+                        })}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </>
+      )}
       {picker.searching ? <p className={css.meta}>{t('addModelSearching')}</p> : null}
       {picker.error === null ? null : <p className={css.diagnostic} role="alert">{t('addModelSearchFailed')}</p>}
       {picker.candidates.length === 1 && active !== undefined && reasonText(active, t, true) !== null ? (

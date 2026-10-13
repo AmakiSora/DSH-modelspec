@@ -6,7 +6,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
-import type { LlmConfigurableProvider, SettingsDescribeValue, SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
+import type {
+  LlmConfigurableProvider, LlmDiscoveredModel, LlmModelDiscoveryRequest, SettingsDescribeValue, SettingsPathOpView,
+} from '@deepseek-ai/dsh-api-remotes/client'
 import { ModelsDevCatalog, ModelsDevError } from '../src/client/catalog-service.ts'
 import { bindingHost, bindingKey, readBindings } from '../src/client/bindings.ts'
 import type { ModelsDevCandidate, ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevSimilar } from '../src/client/types.ts'
@@ -71,6 +73,14 @@ interface Script {
   similar?: ModelsDevSimilar[]
   /** Reject one candidate search instead of answering it. */
   candidatesFailure?: Error
+  /** Models one endpoint interrogation answers with. */
+  discovered?: LlmDiscoveredModel[]
+  /** Answers for successive interrogations, taken before `discovered`. */
+  discoveryQueue?: LlmDiscoveredModel[][]
+  /** Refuse one endpoint interrogation instead of answering it. */
+  discoveryRefusal?: RemoteError
+  /** Reject one endpoint interrogation instead of answering it. */
+  discoveryFailure?: Error
   /** Answer the next `settings.mutate` with instead of accepting it. */
   mutate?: () => { ok: true; value: SettingsDescribeValue['namespaces'][number] } | { ok: false; error: RemoteError }
   /** Run inside `settings.mutate`, standing in for the Host's own broadcast. */
@@ -90,6 +100,7 @@ interface Bench {
   readonly writes: SettingsPathOpView[]
   readonly reads: { catalog: number; refresh: number; match: number }
   readonly searches: { provider: string; modelId: string }[]
+  readonly interrogations: { settingsNs: string; request: LlmModelDiscoveryRequest }[]
 }
 
 /** Build a panel over the given script. */
@@ -104,6 +115,7 @@ function bench(script: Partial<Script> = {}): Bench {
   const writes: SettingsPathOpView[] = []
   const reads = { catalog: 0, refresh: 0, match: 0 }
   const searches: { provider: string; modelId: string }[] = []
+  const interrogations: { settingsNs: string; request: LlmModelDiscoveryRequest }[] = []
   const remote = {
     llm: {
       listConfigurableProviders: () => {
@@ -111,6 +123,13 @@ function bench(script: Partial<Script> = {}): Bench {
         return live.directoryRefusal === undefined
           ? Promise.resolve({ ok: true, value: live.directory })
           : Promise.resolve({ ok: false, error: live.directoryRefusal })
+      },
+      discoverModels: (settingsNs: string, request: LlmModelDiscoveryRequest) => {
+        interrogations.push({ settingsNs, request })
+        if (live.discoveryFailure !== undefined) return Promise.reject(live.discoveryFailure)
+        return live.discoveryRefusal === undefined
+          ? Promise.resolve({ ok: true, value: live.discoveryQueue?.shift() ?? live.discovered ?? [] })
+          : Promise.resolve({ ok: false, error: live.discoveryRefusal })
       },
     },
     settings: {
@@ -161,7 +180,7 @@ function bench(script: Partial<Script> = {}): Bench {
         : Promise.reject(live.candidatesFailure)
     },
   } as unknown as ModelsDevCatalog
-  return { panel: new ModelsDevController({ remote } as never, catalog), script: live, writes, reads, searches }
+  return { panel: new ModelsDevController({ remote } as never, catalog), script: live, writes, reads, searches, interrogations }
 }
 
 /** One ready panel: one route, one model, a published context and modalities that differ. */
@@ -518,6 +537,9 @@ describe('panel controller adds a model', () => {
       searching: false,
       candidates: [],
       error: null,
+      discovering: false,
+      discovered: null,
+      discoverError: null,
     })
     face.cancelPick()
     expect(panel.getSnapshot().picker).toBeNull()
@@ -566,6 +588,9 @@ describe('panel controller adds a model', () => {
       searching: false,
       candidates: [candidate('acme', 'acme-2')],
       error: null,
+      discovering: false,
+      discovered: null,
+      discoverError: null,
     })
   })
 
@@ -786,6 +811,120 @@ describe('panel controller adds a model', () => {
     face.searchModel('acme-2', true)
     await settle()
     expect(panel.getSnapshot().picker).toMatchObject({ fuzzy: true, candidates: [], error: 'the server answered HTTP 503' })
+  })
+})
+
+describe('panel controller asks the route which models its endpoint serves', () => {
+  /** One route whose profile declares the endpoint it is reached at. */
+  function endpointBench(script: Partial<Script> = {}): Bench {
+    return bench({
+      directory: [entry()],
+      described: described([view('llm-pi-ai', {
+        providers: {
+          acme: {
+            api: 'openai-responses',
+            baseURL: 'http://127.0.0.1:5090/v1',
+            models: [{ id: 'acme-1', input: ['text'] }],
+          },
+        },
+      })]),
+      ...script,
+    })
+  }
+
+  /** One model an endpoint reported about itself. */
+  function served(id: string, extra: Partial<LlmDiscoveredModel> = {}): LlmDiscoveredModel {
+    return { id, name: id, ...extra }
+  }
+
+  it('hands the route its own namespace and endpoint facts, and publishes what it answered', async () => {
+    // The interrogation happens on the Host, which holds the route's credential
+    // and can reach an address the browser cannot; the panel's whole part in it
+    // is naming the route and publishing the ids it got back.
+    const { panel, interrogations } = endpointBench({ discovered: [served('acme-2'), served('acme-3', { name: 'Acme Three' })] })
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', null)
+    face.discoverModels()
+    await settle()
+    expect(interrogations).toEqual([{
+      settingsNs: 'llm-pi-ai',
+      request: { provider: 'acme', baseURL: 'http://127.0.0.1:5090/v1', api: 'openai-responses' },
+    }])
+    expect(panel.getSnapshot().picker).toMatchObject({
+      discovering: false,
+      discovered: [served('acme-2'), served('acme-3', { name: 'Acme Three' })],
+      discoverError: null,
+    })
+  })
+
+  it('names only the route when its profile declares no endpoint of its own', async () => {
+    const { panel, interrogations } = addBench({ discovered: [served('acme-2')] })
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', null)
+    face.discoverModels()
+    await settle()
+    expect(interrogations[0]?.request).toEqual({ provider: 'acme' })
+  })
+
+  it('reports an interrogation the host refused without disturbing anything else', async () => {
+    const { panel } = endpointBench({ discoveryRefusal: new RemoteError('llm/model-discovery-rejected', 'could not reach http://127.0.0.1:5090/v1/models', {}) })
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', null)
+    face.discoverModels()
+    await settle()
+    expect(panel.getSnapshot().picker).toMatchObject({
+      discovering: false,
+      discovered: null,
+      discoverError: 'could not reach http://127.0.0.1:5090/v1/models',
+    })
+  })
+
+  it('reports a rejected interrogation with the message it carries', async () => {
+    const { panel } = endpointBench({ discoveryFailure: new Error('the transport closed') })
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', null)
+    face.discoverModels()
+    await settle()
+    expect(panel.getSnapshot().picker).toMatchObject({ discovering: false, discovered: null, discoverError: 'the transport closed' })
+  })
+
+  it('publishes only the newest of two overlapping interrogations', async () => {
+    const { panel, script, interrogations } = endpointBench()
+    script.discoveryQueue = [[served('acme-2')], [served('acme-9')]]
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', null)
+    face.discoverModels()
+    face.discoverModels()
+    await settle()
+    expect(interrogations).toHaveLength(2)
+    expect(panel.getSnapshot().picker).toMatchObject({ discovering: false, discovered: [served('acme-9')] })
+  })
+
+  it('asks nothing while no dialog is open, and lands nothing in one that was closed', async () => {
+    const { panel, interrogations } = endpointBench({ discovered: [served('acme-2')] })
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.discoverModels()
+    expect(interrogations).toEqual([])
+    face.pickModel('llm-pi-ai/acme', null)
+    face.discoverModels()
+    face.cancelPick()
+    await settle()
+    // The answer arrives after the dialog it belonged to is gone, so it is
+    // dropped rather than reopening anything or publishing into nothing.
+    expect(interrogations).toHaveLength(1)
+    expect(panel.getSnapshot().picker).toBeNull()
   })
 })
 

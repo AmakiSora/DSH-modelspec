@@ -37,12 +37,25 @@ Fields covered: context window, max output tokens, and accepted input modalities
 
 **Add model** on a route card opens a dialog that asks for a model id and fills the rest.
 
+- **Fetch available models.** A button beside the id field asks the route's own provider what it
+  serves, so a model can be added without knowing its id in advance. The question goes to the
+  Host, which is where the answer is: an adapter that already describes the route answers from
+  its own catalog without touching the network, and a gateway or self-hosted route is
+  interrogated at the endpoint its profile declares — `{baseURL}/models` for an
+  OpenAI-compatible protocol, the Messages listing for an Anthropic one — using the route's
+  stored credential, which never reaches the browser. Every id the endpoint answers with is
+  offered with what it disclosed about name, context, output, and input types; one the route
+  already configures is shown and marked rather than offered. Taking an id fills the fields and
+  asks models.dev about it, so the comparison below stays in play. A field the endpoint stayed
+  silent about is left to the adapter, and a name that only repeats the id is not stored.
 - **One entry matched.** The published values fill the fields and the dialog names the
   comparison that found it.
 - **Several entries matched.** Every one is offered, with the provider it came from and the
   capacities it publishes, and nothing is chosen until you pick. The same precedence a
   comparison uses decides which entries are offered at all: the resolved provider first, then
-  every provider, and a loose comparison only once the precise ones found nothing.
+  every provider, and a loose comparison only once the precise ones found nothing. An entry
+  chosen here replaces whatever the endpoint disclosed, because that entry is what the row will
+  be compared against.
 - **Nothing matched.** **Fuzzy search** asks the looser question — which published ids came
   close — and offers them nearest first, each labelled with *why* it was offered: identical
   once folded, one id containing the other, or *n* characters apart. A mistyped character, a

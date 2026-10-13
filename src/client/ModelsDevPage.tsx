@@ -243,7 +243,7 @@ function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, onEdi
  */
 export function ModelsDevPage({
   t, useModelsDev, ensure, refresh, applyModel, applyRoute, applyAll,
-  pickModel, searchModel, addModel, saveModel, removeModel, cancelPick,
+  pickModel, searchModel, discoverModels, addModel, saveModel, removeModel, cancelPick,
 }: ModelsDevPageProps): ReactNode {
   useEffect(() => { ensure() }, [ensure])
   const state = useModelsDev(snapshot => snapshot)
@@ -321,6 +321,7 @@ export function ModelsDevPage({
           busy={state.writing.includes(pickerRoute.route.settingsNs)}
           t={t}
           onSearch={searchModel}
+          onDiscover={discoverModels}
           onSubmit={addModel}
           onClose={cancelPick}
         />

@@ -7,6 +7,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { makeTranslate } from './support/translate.ts'
 import type { ModelsDevState } from '../src/client/store.ts'
 import type { ModelsDevOption, ModelsDevSimilarity } from '../src/client/types.ts'
@@ -108,6 +109,7 @@ function props(state: ModelsDevState): ModelsDevPageProps {
     applyAll: vi.fn(),
     pickModel: vi.fn(),
     searchModel: vi.fn(),
+    discoverModels: vi.fn(),
     addModel: vi.fn(),
     saveModel: vi.fn(),
     removeModel: vi.fn(),
@@ -376,7 +378,11 @@ function candidate(providerId: string, id: string, published: Record<string, unk
 function adding(overrides: Partial<NonNullable<ModelsDevState['picker']>> = {}): ModelsDevState {
   return {
     ...ready(),
-    picker: { routeKey: 'llm-pi-ai/acme', modelKey: null, modelId: '', fuzzy: false, searching: false, candidates: [], error: null, ...overrides },
+    picker: {
+      routeKey: 'llm-pi-ai/acme', modelKey: null, modelId: '', fuzzy: false, searching: false,
+      candidates: [], error: null, discovering: false, discovered: null, discoverError: null,
+      ...overrides,
+    },
   }
 }
 
@@ -393,6 +399,16 @@ function type(label: string, value: string): void {
 /** The value one of the dialog's labelled fields holds. */
 function field(label: string): HTMLInputElement {
   return screen.getByLabelText(label) as HTMLInputElement
+}
+
+/** One model a route's own endpoint reported about itself. */
+function served(id: string, disclosed: Record<string, unknown> = {}): LlmDiscoveredModel {
+  return { id, name: id, ...disclosed }
+}
+
+/** The entries in the chooser the route's own endpoint answered with. */
+function servedChoices(): HTMLElement[] {
+  return within(screen.getByRole('radiogroup', { name: /available models/ })).getAllByRole('radio')
 }
 
 describe('adding a model', () => {
@@ -573,6 +589,102 @@ describe('adding a model', () => {
   it('reports the entry that was added', () => {
     panel({ ...ready(), notice: { kind: 'added', id: 'acme-2' } })
     expect(screen.getByText('The model acme-2 was added.')).toBeTruthy()
+  })
+
+  it('asks the route which models it serves, and asks nothing by itself', () => {
+    const injected = props(adding())
+    render(<ModelsDevPage {...injected} />)
+    expect(injected.discoverModels).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch available models' }))
+    expect(injected.discoverModels).toHaveBeenCalledTimes(1)
+  })
+
+  it('says it is asking while the interrogation runs, and refuses a second press', () => {
+    panel(adding({ discovering: true }))
+    const asking = screen.getByRole<HTMLButtonElement>('button', { name: 'Asking the provider…' })
+    expect(asking.disabled).toBe(true)
+  })
+
+  it('offers what the endpoint listed, and takes the id the reader chooses', () => {
+    const injected = props(adding({ discovered: [served('acme-2'), served('acme-9')] }))
+    render(<ModelsDevPage {...injected} />)
+    expect(screen.getByText('The provider listed 2 available models — choose a model id')).toBeTruthy()
+    fireEvent.click(servedChoices()[1] as HTMLElement)
+    // Taking an id asks the catalog the same question typing it would, so the
+    // comparison and the fuzzy fallback stay available for the model.
+    expect(injected.searchModel).toHaveBeenCalledWith('acme-9', false)
+    expect(field('Model id').value).toBe('acme-9')
+    expect((servedChoices()[1] as HTMLElement).getAttribute('aria-checked')).toBe('true')
+    expect((servedChoices()[0] as HTMLElement).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('fills the fields with what the endpoint disclosed about the chosen model', () => {
+    panel(adding({
+      discovered: [served('acme-9', {
+        name: 'Acme Nine', contextWindow: 200000, maxTokens: 8192, inputModalities: ['text', 'image'],
+      })],
+    }))
+    fireEvent.click(servedChoices()[0] as HTMLElement)
+    expect(field('Display name (optional)').value).toBe('Acme Nine')
+    expect(field('Context length').value).toBe('200000')
+    expect(field('Max output').value).toBe('8192')
+    expect((screen.getByLabelText('Accepts image input') as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('leaves the fields an endpoint stayed silent about to the adapter', () => {
+    // Most listing endpoints disclose an id and nothing else. A name that only
+    // repeats the id, and a capacity nobody published, are left empty rather
+    // than filled with the route's template or with a guess.
+    panel(adding({ discovered: [served('acme-9')] }))
+    fireEvent.click(servedChoices()[0] as HTMLElement)
+    expect(field('Display name (optional)').value).toBe('')
+    expect(field('Context length').value).toBe('')
+    expect(field('Max output').value).toBe('')
+  })
+
+  it('refills the preview when the same reported model is taken again', () => {
+    panel(adding({ discovered: [served('acme-9', { contextWindow: 200000 })] }))
+    fireEvent.click(servedChoices()[0] as HTMLElement)
+    type('Context length', '999')
+    fireEvent.click(servedChoices()[0] as HTMLElement)
+    expect(field('Context length').value).toBe('200000')
+  })
+
+  it('keeps what the endpoint disclosed until the reader picks a catalog entry', () => {
+    panel(adding({
+      discovered: [served('acme-9', { contextWindow: 200000 })],
+      candidates: [
+        candidate('openai', 'acme-9', { contextWindow: 128000 }),
+        candidate('azure', 'acme-9', { contextWindow: 64000 }),
+      ],
+    }))
+    fireEvent.click(servedChoices()[0] as HTMLElement)
+    expect(field('Context length').value).toBe('200000')
+    // The catalog entry is what the row will be compared against, so choosing
+    // one replaces the endpoint's own numbers.
+    const catalogChoices = within(screen.getByRole('radiogroup', { name: /entries matched/ })).getAllByRole('radio')
+    fireEvent.click(catalogChoices[1] as HTMLElement)
+    expect(field('Context length').value).toBe('64000')
+  })
+
+  it('refuses an id the route already configures, and says so', () => {
+    panel(adding({ discovered: [served('acme-1'), served('acme-9')] }))
+    expect(screen.getByText('Already configured')).toBeTruthy()
+    expect((servedChoices()[0] as HTMLButtonElement).disabled).toBe(true)
+    expect((servedChoices()[1] as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('reports an interrogation the provider refused', () => {
+    panel(adding({ discoverError: 'could not reach http://127.0.0.1:5090/v1/models' }))
+    expect(screen.getByRole('alert').textContent)
+      .toContain('Fetching the available models failed: could not reach http://127.0.0.1:5090/v1/models')
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+  })
+
+  it('says the provider listed no models rather than offering an empty list', () => {
+    panel(adding({ discovered: [] }))
+    expect(screen.getByText('The provider listed no models. Enter the model id by hand.')).toBeTruthy()
+    expect(screen.queryByRole('radiogroup')).toBeNull()
   })
 })
 

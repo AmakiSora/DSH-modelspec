@@ -63,6 +63,31 @@ describe('configured routes', () => {
     }])
   })
 
+  it('reads the endpoint facts a route declares, and leaves out the ones it does not', () => {
+    // Both are what the panel hands its interrogation of the route's own
+    // endpoint. An adapter answers for a route its own catalog knows without
+    // either; a gateway declares both, and a field the profile left out has to
+    // stay out rather than travel as an empty string the adapter would use.
+    const routes = readRoutes([entry()], described([view('llm-pi-ai', {
+      providers: {
+        acme: {
+          api: 'openai-responses',
+          baseURL: 'http://127.0.0.1:5090/v1',
+          models: [{ id: 'acme-1' }],
+        },
+        blank: {
+          api: '',
+          baseURL: 42,
+          models: [{ id: 'blank-1' }],
+        },
+      },
+    })]))
+    expect(routes[0]?.api).toBe('openai-responses')
+    expect(routes[0]?.baseURL).toBe('http://127.0.0.1:5090/v1')
+    expect(routes[1]?.api).toBeUndefined()
+    expect(routes[1]?.baseURL).toBeUndefined()
+  })
+
   it('reports the array length the namespace holds, entries it could not read included', () => {
     // An entry with no readable id still occupies an index, so the count the
     // panel shows is not the address a new model has to be appended at.

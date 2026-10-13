@@ -331,6 +331,16 @@
   min-width: 0;
 }
 
+/* The upstream fetch control: a row of its own, because its label is a
+   sentence and the id row already shares itself with the fuzzy-search button.
+   Indented past the label column so it lines up with the id field it fills. */
+.addUpstream {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-inline-start: 108px;
+}
+
 .addFieldName {
   flex: none;
   width: 96px;
