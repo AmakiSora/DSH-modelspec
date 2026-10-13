@@ -9,7 +9,7 @@
  * drift into offering different rules for the same choice.
  */
 
-import { type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
@@ -119,6 +119,26 @@ export interface UpstreamProbe {
   readonly onChoose: (model: LlmDiscoveredModel) => void
 }
 
+/**
+ * Whether one model an endpoint listed answers to a search query.
+ *
+ * The question is the substring one — case folded, anywhere in the id or the
+ * name — because it is the reader narrowing a list they are looking at, not a
+ * comparison this panel has to be careful about. A gateway publishes both a
+ * route-style id (`vendor/model`) and a display name, and either is what
+ * somebody remembers.
+ *
+ * @param model - one model the endpoint reported.
+ * @param query - what the reader typed, untrimmed.
+ * @returns whether the model belongs in the narrowed list.
+ */
+export function upstreamMatches(model: LlmDiscoveredModel, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return true
+  return model.id.toLowerCase().includes(needle)
+    || (model.name?.toLowerCase().includes(needle) ?? false)
+}
+
 /** Everything the candidate chooser needs from the dialog around it. */
 export interface CandidatePickerProps {
   /** The pending search, as the controller published it. */
@@ -155,6 +175,16 @@ export interface CandidatePickerProps {
 export function CandidatePicker(props: CandidatePickerProps): ReactNode {
   const { picker, active, disabled, t, modelId, onSearch, onSearchSimilar, onChoose, onConfirm, upstream } = props
   const fuzzy = picker.fuzzy
+  // What the endpoint listed, and the query narrowing it. A provider that
+  // serves a few dozen models is the ordinary case, so the listing is searched
+  // rather than scrolled; a fresh answer drops the query, because the ids that
+  // narrowed the last one would leave the new one looking empty.
+  const listed = upstream?.models ?? null
+  const [query, setQuery] = useState('')
+  useEffect(() => { setQuery('') }, [listed])
+  const matched = listed?.filter(model => upstreamMatches(model, query)) ?? []
+  /** Whether the query is narrowing the listing at all. */
+  const narrowing = query.trim() !== ''
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key !== 'Enter') return
     event.preventDefault()
@@ -198,40 +228,57 @@ export function CandidatePicker(props: CandidatePickerProps): ReactNode {
       {upstream === undefined || upstream.error === null
         ? null
         : <p className={css.diagnostic} role="alert">{t('addUpstreamFailed', { message: upstream.error })}</p>}
-      {upstream === undefined || upstream.models === null ? null : upstream.models.length === 0 ? (
+      {upstream === undefined || listed === null ? null : listed.length === 0 ? (
         <p className={css.meta}>{t('addUpstreamEmpty')}</p>
       ) : (
         <>
-          <p className={css.meta}>{t('addUpstreamFound', { count: String(upstream.models.length) })}</p>
-          <ul className={css.candidates} role="radiogroup"
-            aria-label={t('addUpstreamFound', { count: String(upstream.models.length) })}>
-            {upstream.models.map((model) => {
-              const known = upstream.configured.has(model.id)
-              return (
-                <li key={model.id}>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={upstream.chosen === model.id}
-                    className={css.candidate}
-                    disabled={disabled || known}
-                    onClick={() => { upstream.onChoose(model) }}
-                  >
-                    <span className={css.candidateName}>{model.name ?? model.id}</span>
-                    <code className={css.candidateId}>{model.id}</code>
-                    <span className={css.candidateMeta}>
-                      {known
-                        ? t('addUpstreamConfigured')
-                        : t('addModelCandidateLimits', {
-                          context: capacityText(model.contextWindow),
-                          output: capacityText(model.maxTokens),
-                        })}
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          <div className={css.addUpstreamSearch}>
+            <Input
+              value={query}
+              aria-label={t('addUpstreamSearch')}
+              placeholder={t('addUpstreamSearch')}
+              disabled={disabled}
+              onChange={event => { setQuery(event.target.value) }}
+            />
+          </div>
+          <p className={css.meta}>
+            {narrowing
+              ? matched.length === 0
+                ? t('addUpstreamNoMatch', { query: query.trim() })
+                : t('addUpstreamMatched', { count: String(matched.length) })
+              : t('addUpstreamFound', { count: String(listed.length) })}
+          </p>
+          {matched.length === 0 ? null : (
+            <ul className={css.candidates} role="radiogroup"
+              aria-label={t('addUpstreamMatched', { count: String(matched.length) })}>
+              {matched.map((model) => {
+                const known = upstream.configured.has(model.id)
+                return (
+                  <li key={model.id}>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={upstream.chosen === model.id}
+                      className={css.candidate}
+                      disabled={disabled || known}
+                      onClick={() => { upstream.onChoose(model) }}
+                    >
+                      <span className={css.candidateName}>{model.name ?? model.id}</span>
+                      <code className={css.candidateId}>{model.id}</code>
+                      <span className={css.candidateMeta}>
+                        {known
+                          ? t('addUpstreamConfigured')
+                          : t('addModelCandidateLimits', {
+                            context: capacityText(model.contextWindow),
+                            output: capacityText(model.maxTokens),
+                          })}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </>
       )}
       {picker.searching ? <p className={css.meta}>{t('addModelSearching')}</p> : null}

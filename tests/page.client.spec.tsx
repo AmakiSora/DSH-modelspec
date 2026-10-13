@@ -408,7 +408,12 @@ function served(id: string, disclosed: Record<string, unknown> = {}): LlmDiscove
 
 /** The entries in the chooser the route's own endpoint answered with. */
 function servedChoices(): HTMLElement[] {
-  return within(screen.getByRole('radiogroup', { name: /available models/ })).getAllByRole('radio')
+  return within(screen.getByRole('radiogroup', { name: /listed models/ })).getAllByRole('radio')
+}
+
+/** Narrow the endpoint's own listing, the way the reader does. */
+function searchListed(value: string): void {
+  fireEvent.change(screen.getByLabelText('Search model ids'), { target: { value } })
 }
 
 describe('adding a model', () => {
@@ -616,6 +621,56 @@ describe('adding a model', () => {
     expect(field('Model id').value).toBe('acme-9')
     expect((servedChoices()[1] as HTMLElement).getAttribute('aria-checked')).toBe('true')
     expect((servedChoices()[0] as HTMLElement).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('offers no search box before the endpoint has answered, and none for an empty listing', () => {
+    panel(adding())
+    expect(screen.queryByLabelText('Search model ids')).toBeNull()
+    cleanup()
+    panel(adding({ discovered: [] }))
+    expect(screen.queryByLabelText('Search model ids')).toBeNull()
+  })
+
+  it('narrows the listing to the models a query matches', () => {
+    panel(adding({ discovered: [served('LongCat-2.0'), served('MiniMax-M3'), served('MiniMax-M4')] }))
+    expect(screen.getByText('The provider listed 3 available models — choose a model id')).toBeTruthy()
+    searchListed('minimax')
+    expect(servedChoices()).toHaveLength(2)
+    expect(screen.getByText('2 listed models match')).toBeTruthy()
+  })
+
+  it('matches a display name as well as an id, and folds case', () => {
+    panel(adding({ discovered: [served('acme-9', { name: 'Acme Nine' }), served('acme-10')] }))
+    searchListed('NINE')
+    expect(servedChoices()).toHaveLength(1)
+    expect(screen.getByText('acme-9')).toBeTruthy()
+  })
+
+  it('says when nothing the provider listed matches, and offers nothing to take', () => {
+    panel(adding({ discovered: [served('MiniMax-M3')] }))
+    searchListed('  qwen  ')
+    expect(screen.getByText('No model the provider listed matches "qwen".')).toBeTruthy()
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+  })
+
+  it('offers the whole listing again once the query is cleared', () => {
+    panel(adding({ discovered: [served('MiniMax-M3'), served('MiniMax-M4')] }))
+    searchListed('m4')
+    expect(servedChoices()).toHaveLength(1)
+    searchListed('')
+    expect(servedChoices()).toHaveLength(2)
+    expect(screen.getByText('The provider listed 2 available models — choose a model id')).toBeTruthy()
+  })
+
+  it('forgets the query when a fresh listing arrives', () => {
+    // An id that narrowed the last answer would leave the new one looking as if
+    // the endpoint had stopped serving everything else.
+    const view = render(<ModelsDevPage {...props(adding({ discovered: [served('MiniMax-M3'), served('MiniMax-M4')] }))} />)
+    searchListed('m4')
+    expect(servedChoices()).toHaveLength(1)
+    view.rerender(<ModelsDevPage {...props(adding({ discovered: [served('Qwen3.8-27B'), served('Qwen3.8-32B')] }))} />)
+    expect(servedChoices()).toHaveLength(2)
+    expect(screen.getByText('The provider listed 2 available models — choose a model id')).toBeTruthy()
   })
 
   it('fills the fields with what the endpoint disclosed about the chosen model', () => {

@@ -104,6 +104,7 @@ export interface InputProps {
   readonly placeholder?: string
   readonly disabled?: boolean
   readonly inputMode?: 'numeric' | 'text'
+  readonly 'aria-label'?: string
   readonly 'data-modal-autofocus'?: true
   readonly onChange?: (event: { target: { value: string } }) => void
   readonly onKeyDown?: (event: { key: string; preventDefault: () => void }) => void
@@ -121,6 +122,7 @@ export function Input({ icon, className, onChange, onKeyDown, ...rest }: InputPr
         disabled={rest.disabled}
         placeholder={rest.placeholder}
         inputMode={rest.inputMode}
+        aria-label={rest['aria-label']}
         data-modal-autofocus={rest['data-modal-autofocus'] === true ? '' : undefined}
         onChange={event => { onChange?.({ target: { value: event.target.value } }) }}
         onKeyDown={event => { onKeyDown?.({ key: event.key, preventDefault: () => { event.preventDefault() } }) }}

@@ -45,9 +45,12 @@ Fields covered: context window, max output tokens, and accepted input modalities
   OpenAI-compatible protocol, the Messages listing for an Anthropic one — using the route's
   stored credential, which never reaches the browser. Every id the endpoint answers with is
   offered with what it disclosed about name, context, output, and input types; one the route
-  already configures is shown and marked rather than offered. Taking an id fills the fields and
-  asks models.dev about it, so the comparison below stays in play. A field the endpoint stayed
-  silent about is left to the adapter, and a name that only repeats the id is not stored.
+  already configures is shown and marked rather than offered. A provider that serves a few dozen
+  models is the ordinary case, so the listing carries a search field that narrows it by id or
+  name as you type — and forgets the query when a fresh listing arrives, because the ids that
+  narrowed the last answer would leave the new one looking empty. Taking an id fills the fields
+  and asks models.dev about it, so the comparison below stays in play. A field the endpoint
+  stayed silent about is left to the adapter, and a name that only repeats the id is not stored.
 - **One entry matched.** The published values fill the fields and the dialog names the
   comparison that found it.
 - **Several entries matched.** Every one is offered, with the provider it came from and the

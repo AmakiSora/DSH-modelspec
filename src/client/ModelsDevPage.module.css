@@ -341,6 +341,17 @@
   padding-inline-start: 108px;
 }
 
+/* The search field above the endpoint's own listing: the field takes the whole
+   row, because the list it narrows is the widest thing in the dialog. */
+.addUpstreamSearch {
+  display: flex;
+}
+
+.addUpstreamSearch > span {
+  flex: 1;
+  min-width: 0;
+}
+
 .addFieldName {
   flex: none;
   width: 96px;
