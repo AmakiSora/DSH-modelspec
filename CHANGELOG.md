@@ -8,6 +8,16 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## [Unreleased]
 
+### Changed
+
+- A catalog read that fails no longer blanks the page. The configuration below is the
+  deployment's own state, read through the Host and independent of this browser's network
+  reach, so it still renders — every row reported as unmatched — with the catalog failure
+  carried as a diagnostic beside it. Only a configuration-read failure is fatal, because
+  every row the panel renders comes from it.
+
+## [0.4.1] - 2026-10-14
+
 ### Added
 
 - A **Settings** button in the panel header opens a dialog that sets the address the catalog is
@@ -125,7 +135,8 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - Specs over the matching, the write paths, the browser-local bindings, and the rendered
   page.
 
-[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.1
 [0.4.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.0
 [0.3.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.3.0
 [0.2.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.2.0

@@ -309,6 +309,13 @@ export function ModelsDevPage({
             {t('catalogUpdated', { time: new Date(state.catalog.fetchedAt).toLocaleString() })}
           </p>
         )}
+        {state.catalogError ? (
+          <p className={css.diagnostic} role="alert">
+            <strong>{t('errorTitle')}</strong>
+            {state.catalogError}
+            <span className={css.meta}>{t('catalogUnavailable')}</span>
+          </p>
+        ) : null}
         {state.notice === null ? null : (
           <p className={css.notice} role="status">
             <StateDot appearance="step" state={noticeTone(state.notice)} />

@@ -99,6 +99,8 @@ export interface ModelsDevState {
   readonly writable: boolean
   /** Catalog facts of the read that produced `routes`, or `null` before the first success. */
   readonly catalog: ModelsDevCatalogView | null
+  /** Why the catalog could not be read this round, or `null` when it answered. */
+  readonly catalogError: string | null
   /** Whether a catalog re-read is running. */
   readonly refreshing: boolean
   /** Configured routes with their matches, in directory order. */
@@ -198,6 +200,21 @@ function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: Error })
   return result.value
 }
 
+/**
+ * Swallow one catalog failure into the values a read survives it with.
+ *
+ * The page renders configured rows whether or not the catalog answered, so a
+ * network failure — this browser's own reach, not the deployment's state — is
+ * carried beside the rows as a diagnostic instead of cancelling the whole
+ * read. The matches read rides the same fate: no catalog means no answers, and
+ * every row reports itself unmatched.
+ * @param error - the catalog read's failure.
+ * @returns the failure's message and the absent facts it leaves behind.
+ */
+function catalogFailure(error: unknown): { readonly catalog: null; readonly catalogError: string } {
+  return { catalog: null, catalogError: messageOf(error) }
+}
+
 /** The message a caught value reports. */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -252,6 +269,7 @@ export class ModelsDevController {
       error: null,
       writable: false,
       catalog: null,
+      catalogError: null,
       refreshing: false,
       routes: [],
       writing: [],
@@ -302,7 +320,7 @@ export class ModelsDevController {
     if (address === '') return
     writeCatalogEndpoint(bindingHost(), address)
     this.catalog.retarget(address)
-    this.patch({ catalogEndpoint: address, settingsOpen: false, status: 'loading', error: null })
+    this.patch({ catalogEndpoint: address, settingsOpen: false, status: 'loading', error: null, catalogError: null })
     await this.load(true)
   }
 
@@ -651,6 +669,14 @@ export class ModelsDevController {
   /**
    * Read the directory, the settings namespaces, and the catalog, then publish
    * one answer per configured model.
+   *
+   * The catalog read is the one whose failure the page survives: it is this
+   * browser's own network reach, and a deployment whose configuration is
+   * readable is still worth showing while it cannot be compared — the rows
+   * render as unmatched rather than disappearing behind a whole-page error.
+   * A configuration read that fails is fatal, because every row the panel
+   * renders comes from it.
+   *
    * @param force - whether to read the catalog again instead of its held copy.
    */
   private async load(force: boolean): Promise<void> {
@@ -675,9 +701,12 @@ export class ModelsDevController {
       // A deployment with no configured model has nothing to compare, so its
       // catalog is left unread; an explicit refresh reads it regardless.
       const compare = force || lookups.length > 0
-      const [catalog, matches] = await Promise.all([
-        compare ? this.catalog.view(force) : Promise.resolve(null),
-        compare ? this.catalog.match(lookups) : Promise.resolve([] as ModelsDevMatch[]),
+      const [catalogAnswer, matches] = await Promise.all([
+        compare ? this.catalog.view(force).then(
+          catalog => ({ catalog, catalogError: null }),
+          catalogFailure,
+        ) : Promise.resolve({ catalog: null, catalogError: null }),
+        compare ? this.catalog.match(lookups).catch(() => [] as ModelsDevMatch[]) : Promise.resolve([] as ModelsDevMatch[]),
       ])
       if (this.stale(generation)) return
       const answers = answersBy(matches)
@@ -686,7 +715,8 @@ export class ModelsDevController {
         error: null,
         writable: described.writable,
         refreshing: false,
-        catalog,
+        catalog: catalogAnswer.catalog,
+        catalogError: catalogAnswer.catalogError,
         routes: routes.map(route => ({
           key: routeKeyOf(route),
           route,
@@ -698,6 +728,9 @@ export class ModelsDevController {
       })
     } catch (error: unknown) {
       if (this.stale(generation)) return
+      // A surviving catalog failure has already been turned into a value above;
+      // what reaches this branch is a configuration read, which the page cannot
+      // render without.
       this.patch({ status: 'error', error: messageOf(error), refreshing: false })
     }
   }

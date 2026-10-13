@@ -303,6 +303,20 @@ describe('model specs page', () => {
     expect(screen.getByText(/the server answered HTTP 503/)).toBeTruthy()
   })
 
+  it('renders the configured rows beside a catalog failure instead of nothing', () => {
+    // The configuration is the Host's own state; the catalog is this browser's
+    // network reach. One failing says nothing about the other, so the rows
+    // survive with the diagnostic carried beside them.
+    panel({
+      ...ready(),
+      catalog: null,
+      catalogError: 'could not read the catalog: signal timed out',
+    })
+    expect(screen.getByText(/signal timed out/)).toBeTruthy()
+    expect(screen.getByText(/compared against nothing/)).toBeTruthy()
+    expect(screen.getByText('acme-1')).toBeTruthy()
+  })
+
   it('says the panel is loading while the first read runs', () => {
     panel({ ...IDLE, status: 'loading' })
     expect(screen.getByText(/Reading the OpenRouter catalog/)).toBeTruthy()
