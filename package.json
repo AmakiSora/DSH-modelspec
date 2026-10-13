@@ -1,6 +1,6 @@
 {
   "name": "dsh-modelspec",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A dsh web-client plugin: compares the models.dev catalog with the models this deployment configured and writes the differences back",
   "license": "MIT",
   "type": "module",
