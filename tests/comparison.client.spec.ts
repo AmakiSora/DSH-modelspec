@@ -103,6 +103,31 @@ describe('model comparison', () => {
     expect(isModalityDifference({ field: 'contextWindow', configured: 1, published: 2 })).toBe(false)
     expect(isModalityDifference({ field: 'maxTokens', configured: 1, published: 2 })).toBe(false)
   })
+
+  it('reports a reasoning-efforts dict the catalog publishes and the deployment declares differently', () => {
+    const published = entry({ declaredEfforts: { off: null, high: 'high' } })
+    expect(compareModel(model({ reasoningEfforts: { off: null, high: 'ultra' } }), match(published))).toEqual([
+      { field: 'reasoningEfforts', configured: { off: null, high: 'ultra' }, published: { off: null, high: 'high' } },
+    ])
+    // An entry that declares nothing at all differs from a published dict too.
+    expect(compareModel(model(), match(published))).toEqual([
+      { field: 'reasoningEfforts', configured: undefined, published: { off: null, high: 'high' } },
+    ])
+  })
+
+  it('compares reasoning efforts level by level, so key order alone is not a difference', () => {
+    const published = entry({ declaredEfforts: { off: null, low: 'low', high: 'high' } })
+    expect(compareModel(model({ reasoningEfforts: { high: 'high', off: null, low: 'low' } }), match(published))).toEqual([])
+  })
+
+  it('leaves the reasoning efforts alone when the catalog publishes none', () => {
+    expect(compareModel(model({ reasoningEfforts: { off: null, high: 'high' } }), match(entry()))).toEqual([])
+  })
+
+  it('compares a non-reasoning declaration against a published dict', () => {
+    expect(compareModel(model({ reasoningEfforts: false }), match(entry({ declaredEfforts: { off: null, high: 'high' } }))))
+      .toEqual([{ field: 'reasoningEfforts', configured: false, published: { off: null, high: 'high' } }])
+  })
 })
 
 describe('adoption edits', () => {
@@ -198,6 +223,30 @@ describe('editing one configured model', () => {
 
   it('leaves the modalities alone when only their order differs', () => {
     expect(editOps(route(), model(), { name: '', inputModalities: ['text'] })).toEqual([])
+  })
+
+  it('writes a reasoning-efforts edit under the field name the adapter declares', () => {
+    const stored = model({ reasoningEfforts: { off: null, high: 'high' } })
+    expect(editOps(route(), stored, { name: '', inputModalities: ['text'], reasoningEfforts: { off: null, high: 'max' } }))
+      .toEqual([{ op: 'set', path: ['providers', 'acme', 'models', '2', 'reasoningEfforts'], value: { off: null, high: 'max' } }])
+  })
+
+  it('unsets a cleared reasoning-efforts declaration, handing it back to the adapter', () => {
+    const stored = model({ reasoningEfforts: { off: null, high: 'high' } })
+    expect(editOps(route(), stored, { name: '', inputModalities: ['text'] }))
+      .toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '2', 'reasoningEfforts'] }])
+  })
+
+  it('writes nothing when the reasoning efforts did not change', () => {
+    const stored = model({ reasoningEfforts: { off: null, high: 'high' } })
+    expect(editOps(route(), stored, {
+      name: '', inputModalities: ['text'], reasoningEfforts: { high: 'high', off: null },
+    })).toEqual([])
+  })
+
+  it('writes a non-reasoning declaration as the boolean the adapter reads', () => {
+    expect(editOps(route(), model(), { name: '', inputModalities: ['text'], reasoningEfforts: false }))
+      .toEqual([{ op: 'set', path: ['providers', 'acme', 'models', '2', 'reasoningEfforts'], value: false }])
   })
 })
 

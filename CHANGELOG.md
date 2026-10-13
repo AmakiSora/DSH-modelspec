@@ -8,6 +8,32 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-14
+
+### Added
+
+- **Reasoning efforts can be configured on a model.** The add-model and edit-model dialogs offer
+  a reasoning-effort block on every route whose namespace family accepts the field — pi-ai, in
+  practice — with one field per level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`)
+  whose value is the wire spelling sent to the provider, an *off* left empty meaning "supported
+  but sends no parameter", and a **Non-reasoning model** switch that writes the outright `false`
+  the adapter reads as a model that never reasons. Declaring efforts is what makes a third-party
+  model offer its reasoning-strength selection at all: an entry without one is served at the
+  provider's default, with no levels to choose from. A draft that declares no level beyond `off`
+  is refused before the write, mirroring the rule the adapter's own resolution enforces.
+
+### Changed
+
+- **The catalog is read from [OpenRouter](https://openrouter.ai/api/v1/models) instead of
+  models.dev.** OpenRouter publishes every fact the panel compared before — context window,
+  output cap, input modalities, prices, capabilities — and one it did not: the reasoning efforts
+  each model accepts, with its default. A matched entry therefore prefills the effort fields, and
+  a stored declaration that differs from the published one is a difference like any other, which
+  the adopt buttons write back. Model ids on OpenRouter carry their vendor prefix
+  (`anthropic/claude-…`), which the comparisons account for: an exact id, the id without its
+  prefix, and the folded id are tried in that order, and a fuzzy search reaches a prefixed entry
+  through its bare form.
+
 ## [0.3.0] - 2026-10-13
 
 ### Added
@@ -89,7 +115,8 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - Specs over the matching, the write paths, the browser-local bindings, and the rendered
   page.
 
-[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.0
 [0.3.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.3.0
 [0.2.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.2.0
 [0.1.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.1.0

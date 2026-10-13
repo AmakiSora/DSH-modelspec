@@ -53,6 +53,7 @@ describe('configured routes', () => {
       revision: 7,
       arrayLength: 1,
       preset: false,
+      reasoningCapable: true,
       models: [{
         index: 0,
         id: 'acme-1',
@@ -61,6 +62,32 @@ describe('configured routes', () => {
         modalityField: 'input',
       }],
     }])
+  })
+
+  it('reads a reasoning-efforts declaration and marks the route capable of the field', () => {
+    const routes = readRoutes([entry()], described([view('llm-pi-ai', {
+      providers: { acme: { models: [
+        { id: 'a', reasoningEfforts: { off: null, high: 'high' } },
+        { id: 'b', reasoningEfforts: false },
+      ] } },
+    })]))
+    expect(routes[0]?.reasoningCapable).toBe(true)
+    expect(routes[0]?.models[0]?.reasoningEfforts).toEqual({ off: null, high: 'high' })
+    expect(routes[0]?.models[1]?.reasoningEfforts).toBe(false)
+  })
+
+  it('reads no declaration from an empty or malformed efforts dict', () => {
+    const routes = readRoutes([entry()], described([view('llm-pi-ai', {
+      providers: { acme: { models: [
+        { id: 'a', reasoningEfforts: {} },
+        { id: 'b', reasoningEfforts: null },
+        { id: 'c', reasoningEfforts: { ultra: 'x', high: 42 } },
+      ] } },
+    })]))
+    expect(routes[0]?.reasoningCapable).toBe(false)
+    for (const model of routes[0]?.models ?? []) {
+      expect(model.reasoningEfforts).toBeUndefined()
+    }
   })
 
   it('reads the endpoint facts a route declares, and leaves out the ones it does not', () => {

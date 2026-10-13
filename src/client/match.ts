@@ -61,8 +61,11 @@ function bareId(value: string): string {
 
 /**
  * Build the comparisons for one requested model id, in the order they are
- * tried: the id verbatim, the entry's cross-provider id, the id without its
- * vendor prefix, and the folded id.
+ * tried: the id verbatim, the id without its vendor prefix, and the folded id.
+ *
+ * The catalog publishes every id with its vendor prefix, so the bare comparison
+ * is what an id typed without one — the ordinary hand-typed spelling, and the
+ * id many gateways store — reaches its entry through.
  */
 function comparisonsFor(modelId: string): readonly Comparison[] {
   const wanted = modelId.trim()
@@ -70,12 +73,11 @@ function comparisonsFor(modelId: string): readonly Comparison[] {
   const bare = (value: string | undefined): boolean => value !== undefined && bareId(value) === wanted
   return [
     { accepts: entry => entry.view.id === wanted, strategy: 'exact', providerScoped: true },
-    { accepts: entry => entry.canonicalId === wanted, strategy: 'canonical', providerScoped: true },
-    { accepts: entry => bare(entry.view.id) || bare(entry.canonicalId), strategy: 'bare', providerScoped: false },
+    { accepts: entry => bare(entry.view.id), strategy: 'bare', providerScoped: false },
     {
       accepts: entry => folded !== ''
         && (normalizeId(entry.view.id) === folded
-          || (entry.canonicalId !== undefined && normalizeId(entry.canonicalId) === folded)),
+          || normalizeId(bareId(entry.view.id)) === folded),
       strategy: 'normalized',
       providerScoped: true,
     },
@@ -375,9 +377,20 @@ interface Scored {
   readonly preferred: boolean
 }
 
-/** The folded spellings one entry answers to: its id and its cross-provider id. */
+/**
+ * The folded spellings one entry answers to.
+ *
+ * OpenRouter publishes every id with its vendor prefix, but a reader typing an
+ * id, a route storing one, and a fuzzy query all commonly name the bare form.
+ * A prefixed entry therefore answers to both its full folded id and the folded
+ * id of its bare form; the two coincide when the entry has no prefix.
+ */
 function foldingsOf(entry: IndexedModel): string[] {
-  return [normalizeId(entry.view.id), entry.canonicalId === undefined ? '' : normalizeId(entry.canonicalId)]
+  const bare = bareId(entry.view.id)
+  return [
+    normalizeId(entry.view.id),
+    bare === entry.view.id ? '' : normalizeId(bare),
+  ]
 }
 
 /**

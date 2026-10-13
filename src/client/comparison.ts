@@ -6,7 +6,8 @@
  */
 
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
-import type { ModelsDevMatch, ModelsDevModality } from './types.ts'
+import type { ModelsDevMatch, ModelsDevModality, ReasoningEfforts } from './types.ts'
+import { REASONING_LEVELS } from './types.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ConfiguredModel, ConfiguredRoute, ModalityField } from './configured.ts'
 
@@ -15,21 +16,35 @@ import type { ConfiguredModel, ConfiguredRoute, ModalityField } from './configur
  * included because a namespace names its own: whichever family declared the
  * entry is the field a write addresses.
  */
-export type DifferenceField = 'contextWindow' | 'maxTokens' | ModalityField
+export type DifferenceField = 'contextWindow' | 'maxTokens' | ModalityField | 'reasoningEfforts'
 
 /** One stored field whose value differs from the catalog entry. */
 export interface FieldDifference {
   /** Stored field the difference is about. */
   readonly field: DifferenceField
   /** Value the deployment stores, or `undefined` when the entry declares none. */
-  readonly configured: number | readonly ModelsDevModality[] | undefined
+  readonly configured: number | readonly ModelsDevModality[] | ReasoningEfforts | undefined
   /** Value the catalog publishes for it. */
-  readonly published: number | readonly ModelsDevModality[]
+  readonly published: number | readonly ModelsDevModality[] | ReasoningEfforts
 }
 
 /** Whether one difference is about the accepted modalities. */
 export function isModalityDifference(difference: FieldDifference): boolean {
   return difference.field === 'input' || difference.field === 'inputModalities'
+}
+
+/**
+ * Compare two reasoning-effort declarations level by level, treating an absent
+ * level and an absent declaration as the same "nothing here" answer.
+ */
+function sameEfforts(left: ReasoningEfforts | undefined, right: ReasoningEfforts | undefined): boolean {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return false
+  if (left === false || right === false) return left === right
+  for (const level of REASONING_LEVELS) {
+    if ((left[level] ?? null) !== (right[level] ?? null)) return false
+  }
+  return true
 }
 
 /** Compare two modality lists as sets, so order alone is not a difference. */
@@ -57,12 +72,19 @@ export function compareModel(model: ConfiguredModel, match: ModelsDevMatch): Fie
   if (model.modalityField !== undefined && !sameModalities(model.inputModalities, published.inputModalities)) {
     differences.push({ field: model.modalityField, configured: model.inputModalities, published: published.inputModalities })
   }
+  const efforts = published.declaredEfforts
+  if (efforts !== undefined && !sameEfforts(model.reasoningEfforts, efforts)) {
+    differences.push({ field: 'reasoningEfforts', configured: model.reasoningEfforts, published: efforts })
+  }
   return differences
 }
 
 /** Project one difference onto the JSON value a settings write carries. */
 function writtenValue(difference: FieldDifference): JsonValue {
-  return typeof difference.published === 'number' ? difference.published : [...difference.published]
+  if (typeof difference.published === 'number') return difference.published
+  if (difference.published === false) return false
+  if (difference.field === 'reasoningEfforts') return { ...(difference.published as Exclude<ReasoningEfforts, false | undefined>) }
+  return [...difference.published as readonly ModelsDevModality[]]
 }
 
 /** The values one edited model entry should end up holding. */
@@ -75,6 +97,8 @@ export interface EditedModel {
   readonly maxTokens?: number
   /** Accepted modalities the entry should declare. */
   readonly inputModalities: readonly ModelsDevModality[]
+  /** Reasoning efforts the entry should declare, or `undefined` to leave the field to the adapter. */
+  readonly reasoningEfforts?: ReasoningEfforts
 }
 
 /**
@@ -115,6 +139,11 @@ export function editOps(route: ConfiguredRoute, model: ConfiguredModel, edited: 
   }
   if (model.modalityField !== undefined && !sameModalities(model.inputModalities, edited.inputModalities)) {
     ops.push({ op: 'set', path: [...base, model.modalityField], value: [...edited.inputModalities] })
+  }
+  if (!sameEfforts(model.reasoningEfforts, edited.reasoningEfforts)) {
+    ops.push(edited.reasoningEfforts === undefined
+      ? { op: 'unset', path: [...base, 'reasoningEfforts'] }
+      : { op: 'set', path: [...base, 'reasoningEfforts'], value: writtenValue({ field: 'reasoningEfforts', configured: undefined, published: edited.reasoningEfforts }) })
   }
   return ops
 }

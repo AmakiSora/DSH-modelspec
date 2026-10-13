@@ -54,7 +54,7 @@ function matchFor(provider: string, modelId: string, published?: Record<string, 
 
 /** The catalog facts a successful read publishes. */
 const CATALOG: ModelsDevCatalogView = {
-  source: 'https://models.dev/api.json',
+  source: 'https://openrouter.ai/api/v1/models',
   fetchedAt: 4242,
   providers: [{ id: 'acme', name: 'Acme', modelCount: 2 }],
   modelCount: 2,

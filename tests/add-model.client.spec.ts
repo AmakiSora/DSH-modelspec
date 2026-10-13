@@ -143,4 +143,59 @@ describe('the draft rules', () => {
   it('reports the id before the capacity, so the reader is told the first thing to fix', () => {
     expect(newModelProblem(route(), entry({ id: 'acme-1', contextWindow: 0 }))).toBe('duplicate-id')
   })
+
+  it('carries a reasoning-efforts declaration the route accepts', () => {
+    const ops = addModelOps(route(), entry({
+      reasoningEfforts: { off: null, high: 'high' },
+    }))
+    expect(ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models', '1'],
+      value: { id: 'acme-2', reasoningEfforts: { off: null, high: 'high' } },
+    }])
+  })
+
+  it('writes a non-reasoning declaration as the boolean the adapter reads', () => {
+    expect(addModelOps(route(), entry({ reasoningEfforts: false }))[0])
+      .toEqual({ op: 'set', path: ['providers', 'acme', 'models', '1'], value: { id: 'acme-2', reasoningEfforts: false } })
+  })
+
+  it('leaves the field out when the draft declares none', () => {
+    expect(addModelOps(route(), entry())[0])
+      .toEqual({ op: 'set', path: ['providers', 'acme', 'models', '1'], value: { id: 'acme-2' } })
+  })
+
+  it('donates the donor model reasoning efforts to the template', () => {
+    // The donor is the last model declaring anything, so one that declares only
+    // efforts is still the donor, and its declaration travels with it.
+    const template = newModelTemplate(route({
+      models: [
+        model({ id: 'a', contextWindow: 4096 }),
+        model({ id: 'b', reasoningEfforts: { off: null, low: 'low' } }),
+      ],
+    }))
+    expect(template.reasoningEfforts).toEqual({ off: null, low: 'low' })
+  })
+
+  it('does not mix a declaration one model holds into a donor without one', () => {
+    const template = newModelTemplate(route({
+      models: [
+        model({ id: 'a', reasoningEfforts: { off: null, low: 'low' } }),
+        model({ id: 'b', contextWindow: 4096 }),
+      ],
+    }))
+    expect(template.reasoningEfforts).toBeUndefined()
+  })
+
+  it('refuses a dict that offers no level beyond off, which resolution would reject', () => {
+    expect(newModelProblem(route(), entry({ reasoningEfforts: { off: null } }))).toBe('invalid-efforts')
+    expect(newModelProblem(route(), entry({ reasoningEfforts: {} }))).toBe('invalid-efforts')
+    expect(newModelProblem(route(), entry({ reasoningEfforts: { off: null, high: '' } }))).toBe('invalid-efforts')
+  })
+
+  it('accepts a false declaration, a usable dict, and an absent one', () => {
+    expect(newModelProblem(route(), entry({ reasoningEfforts: false }))).toBeUndefined()
+    expect(newModelProblem(route(), entry({ reasoningEfforts: { off: null, high: 'high' } }))).toBeUndefined()
+    expect(newModelProblem(route(), entry({ reasoningEfforts: undefined }))).toBeUndefined()
+  })
 })

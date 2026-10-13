@@ -1,16 +1,15 @@
 /**
- * The browser-side models.dev catalog: reads the published document from an
- * address models.dev serves with open CORS, holds the indexed result for a
- * configured lifetime, and matches configured provider routes and models
- * against it.
+ * The browser-side catalog: reads the published document from an address the
+ * catalog serves with open CORS, holds the indexed result for a configured
+ * lifetime, and matches configured provider routes and models against it.
  */
 
 import { catalogView, indexCatalog, type CatalogIndex } from './catalog.ts'
 import { matchBound, matchCandidates, matchModel, similarCandidates, DEFAULT_SIMILAR_LIMIT, type ProviderAliases } from './match.ts'
 import type { ModelsDevCandidate, ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevSimilar } from './types.ts'
 
-/** The address models.dev publishes its machine-readable catalog at. */
-export const MODELS_DEV_ENDPOINT = 'https://models.dev/api.json'
+/** The address the catalog publishes its machine-readable document at. */
+export const CATALOG_ENDPOINT = 'https://openrouter.ai/api/v1/models'
 
 /** How long a retrieved catalog is served before it is read again. */
 export const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000
@@ -32,7 +31,7 @@ export class ModelsDevError extends Error {
 }
 
 /**
- * Read, hold, and match the models.dev catalog in one browser.
+ * Read, hold, and match the catalog in one browser.
  *
  * One retrieval is in flight at a time: every caller that arrives while a read
  * runs waits on it. A failed read holds nothing, so the next caller retries.
@@ -48,7 +47,7 @@ export class ModelsDevCatalog {
    * @param options - deployment choices; every field has a default.
    */
   constructor(
-    private readonly endpoint: string = MODELS_DEV_ENDPOINT,
+    private readonly endpoint: string = CATALOG_ENDPOINT,
     private readonly cacheTtlMs: number = DEFAULT_CACHE_TTL_MS,
     private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
     private readonly providerAliases: ProviderAliases = {},
@@ -65,8 +64,7 @@ export class ModelsDevCatalog {
    * @returns the address, retrieval time, provider rows, and entry counts.
    * @throws {ModelsDevError} when the document cannot be read or parsed.
    */
-  async view(refresh = false): Promise<ModelsDevCatalogView> {
-    if (refresh) this.held = undefined
+  async view(refresh = false): Promise<ModelsDevCatalogView> {    if (refresh) this.held = undefined
     return catalogView(await this.index())
   }
 
@@ -163,7 +161,7 @@ export class ModelsDevCatalog {
       return indexCatalog(this.endpoint, Date.now(), await response.json() as unknown)
     } catch (error: unknown) {
       throw new ModelsDevError(
-        `could not read the models.dev catalog: ${error instanceof Error ? error.message : String(error)}`,
+        `could not read the catalog: ${error instanceof Error ? error.message : String(error)}`,
         this.endpoint,
         { cause: error },
       )

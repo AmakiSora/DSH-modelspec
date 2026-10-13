@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import { CandidatePicker, ModelFields, fieldsFrom, optionKey, type PickerFields, type PickerTranslate } from './ModelPicker.tsx'
+import { CandidatePicker, ModelFields, effortFields, effortsFromFields, fieldsFrom, optionKey, type PickerFields, type PickerTranslate } from './ModelPicker.tsx'
 import type { EntryBinding } from './bindings.ts'
 import type { EditedModel } from './comparison.ts'
 import type { ModelsDevOption } from './types.ts'
@@ -72,7 +72,6 @@ export function EditModelDialog({
   const [modelId, setModelId] = useState(row.model.id)
   const [binding, setBinding] = useState<EntryBinding | undefined>(pinned)
   const [fields, setFields] = useState<PickerFields>(() => ({ ...fieldsFrom(undefined), ...modelFields(row) }))
-
   // The entry the fields are filled from: the one the reader pinned, or the one
   // the model already follows, or the single entry a search answered with.
   const current = useMemo(() => {
@@ -101,11 +100,13 @@ export function EditModelDialog({
     setFields(active === undefined ? modelFields(row) : fieldsFrom(active))
   })
 
+  const efforts = route.route.reasoningCapable ? effortsFromFields(fields) : undefined
   const edited: EditedModel = {
     name: fields.name,
     ...fields.context.trim() === '' ? {} : { contextWindow: Number(fields.context) },
     ...fields.output.trim() === '' ? {} : { maxTokens: Number(fields.output) },
     inputModalities: fields.image ? ['text', 'image'] : ['text'],
+    ...efforts === undefined ? {} : { reasoningEfforts: efforts },
   }
   const disabled = !writable || busy
   const submit = (): void => {
@@ -149,8 +150,10 @@ export function EditModelDialog({
           {pinned === undefined
             ? t('editModelSourceAuto', { entry: row.match.model === undefined ? t('strategyNone') : row.match.model.id })
             : t('editModelSourcePinned', { entry: `${pinned.providerId}/${pinned.modelId}` })}
-        </p>
-        <ModelFields fields={fields} disabled={disabled} t={t} onChange={setFields} />
+        </p>        <ModelFields
+          fields={fields} disabled={disabled} t={t} onChange={setFields}
+          reasoningCapable={route.route.reasoningCapable}
+        />
       </div>
     </Modal>
   )
@@ -163,5 +166,6 @@ function modelFields(row: ModelRowView): PickerFields {
     context: row.model.contextWindow === undefined ? '' : String(row.model.contextWindow),
     output: row.model.maxTokens === undefined ? '' : String(row.model.maxTokens),
     image: row.model.inputModalities.includes('image'),
+    ...effortFields(row.model.reasoningEfforts),
   }
 }

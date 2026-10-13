@@ -1,9 +1,37 @@
-/** Client-safe views of the models.dev catalog and of one configured model matched against it. */
+/** Client-safe views of the OpenRouter catalog and of one configured model matched against it. */
 
 import type { EntryBinding } from './bindings.ts'
 
 /** Input modalities a DSH model entry can declare, mirroring the adapters' `ModelModality`. */
 export type ModelsDevModality = 'text' | 'image'
+
+/**
+ * The reasoning levels a pi-ai model entry may declare, in the escalation order
+ * the adapter publishes. Each level maps to the wire spelling dispatch sends;
+ * `off: null` means the level is supported but sends no parameter, and a level
+ * absent from a declared dict is pinned unsupported by the adapter's
+ * `resolveModelReasoning`.
+ */
+export type ReasoningLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** Every reasoning level, in the order the panel renders them. */
+export const REASONING_LEVELS: readonly ReasoningLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * Reasoning efforts one model entry declares: `false` for a non-reasoning
+ * model, otherwise a partial dict of level → wire value (`null` for the `off`
+ * level that sends nothing). A partial dict is what the adapter's schema
+ * accepts: resolution reads only present keys.
+ */
+export type ReasoningEfforts = false | { readonly [level in ReasoningLevel]?: string | null }
+
+/** The supported reasoning efforts one catalog entry publishes. */
+export interface PublishedReasoning {
+  /** The levels the endpoint accepts, in the order the catalog published them. */
+  readonly efforts: readonly ReasoningLevel[]
+  /** The level the endpoint serves by default, when it published one. */
+  readonly defaultEffort?: ReasoningLevel
+}
 
 /** Published token prices in US dollars per million tokens. */
 export interface ModelsDevCost {
@@ -33,6 +61,14 @@ export interface ModelsDevModel {
   inputModalities: readonly ModelsDevModality[]
   /** Whether the model returns separate reasoning output. */
   reasoning: boolean
+  /** The reasoning efforts the endpoint accepts, when the catalog published them. */
+  reasoningEfforts?: PublishedReasoning
+  /**
+   * The dict a DSH model entry would declare from this entry, translated by the
+   * panel's own rule; absent when the entry published nothing usable. Comparison
+   * and prefill both read this rather than re-deriving it.
+   */
+  declaredEfforts?: ReasoningEfforts
   /** Whether the model accepts tool calls. */
   toolCall: boolean
   /** Whether the model accepts a structured-output response format. */
@@ -77,8 +113,6 @@ export interface ModelsDevCatalogView {
 export type ModelsDevMatchStrategy =
   /** Identical model id inside the resolved provider. */
   | 'exact'
-  /** The entry's `canonical_model_id`. */
-  | 'canonical'
   /** The entry id after its vendor prefix, as gateways publish foreign models. */
   | 'bare'
   /** Ignoring case, punctuation, and a trailing release date. */
@@ -155,7 +189,7 @@ export interface ModelsDevMatch {
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** The catalog could not be read or did not parse into a usable document. */
-    'models-dev/catalog-unavailable': {
+    'catalog/catalog-unavailable': {
       /** Address the read was attempted against. */
       readonly source: string
     }

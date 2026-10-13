@@ -1,8 +1,8 @@
 # DSH-modelspec
 
 A [dsh](https://github.com/deepseek-ai/deepseek-harness) web-client plugin. It reads the
-[models.dev](https://models.dev) catalog, compares it against the models this deployment
-actually configured, and writes the differences back.
+[OpenRouter](https://openrouter.ai) catalog, compares it against the models a deployment
+configured, and writes the differences back.
 
 The panel is the **Model specs** entry in the left sidebar. One card per configured provider
 route, one row per model inside it, and the stored value beside the published one wherever
@@ -31,7 +31,22 @@ Repository: [AmakiSora/DSH-modelspec](https://github.com/AmakiSora/DSH-modelspec
 - **Refuses to invent.** A field the catalog does not publish is never proposed, and a model
   with no catalog entry at all is reported as unmatched rather than guessed at.
 
-Fields covered: context window, max output tokens, and accepted input modalities.
+Fields covered: context window, max output tokens, accepted input modalities, and reasoning
+efforts. The effort comparison only runs where the deployment's namespace family accepts the
+field — pi-ai routes, in practice — and only when the catalog entry publishes efforts, which
+OpenRouter does for the models whose endpoints name them.
+
+## Reasoning efforts
+
+A pi-ai model entry that declares no `reasoningEfforts` is served as a non-reasoning model, and
+the harness UI offers no reasoning-strength selection for it. The panel's add and edit dialogs
+therefore carry an effort block on every pi-ai route: one field per level whose value is the
+wire spelling sent to the provider, an *off* left empty meaning "supported but sends no
+parameter", and a **Non-reasoning model** switch that writes the outright `false`. Matching an
+OpenRouter entry prefills the fields with the efforts it publishes, and a stored declaration
+that differs from the published one is a difference the adopt buttons write back. A draft that
+declares no level beyond `off` is refused before the write, mirroring the rule the adapter's
+own resolution enforces.
 
 ## Adding a model
 
@@ -49,7 +64,7 @@ Fields covered: context window, max output tokens, and accepted input modalities
   models is the ordinary case, so the listing carries a search field that narrows it by id or
   name as you type — and forgets the query when a fresh listing arrives, because the ids that
   narrowed the last answer would leave the new one looking empty. Taking an id fills the fields
-  and asks models.dev about it, so the comparison below stays in play. A field the endpoint
+  and asks the catalog about it, so the comparison below stays in play. A field the endpoint
   stayed silent about is left to the adapter, and a name that only repeats the id is not stored.
 - **One entry matched.** The published values fill the fields and the dialog names the
   comparison that found it.
@@ -255,7 +270,7 @@ of dsh. `1.0.0` is the release to make once the panel's behaviour has been relie
 src/index.ts                 node half (empty apply)
 src/client/index.ts          apply(): sidebar entry + main panel + change subscriptions
 src/client/catalog-service.ts browser-side catalog read, TTL cache, single-flight
-src/client/catalog.ts        models.dev document parsing and indexing (zod)
+src/client/catalog.ts        OpenRouter document parsing and indexing (zod)
 src/client/match.ts          configured route/model → catalog entry, and the fuzzy search
 src/client/configured.ts     settings namespaces → configured routes and models
 src/client/comparison.ts     differences between stored and published values; write ops

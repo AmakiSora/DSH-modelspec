@@ -5,7 +5,8 @@
  */
 
 import type { LlmConfigurableProvider, SettingsDescribeValue, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
-import type { ModelsDevModality } from './types.ts'
+import type { ModelsDevModality, ReasoningEfforts, ReasoningLevel } from './types.ts'
+import { REASONING_LEVELS } from './types.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 /** The two field names a DSH model entry stores its accepted modalities under. */
@@ -27,6 +28,8 @@ export interface ConfiguredModel {
   readonly inputModalities: readonly ModelsDevModality[]
   /** Field name this namespace family stores modalities under; absent when the entry declares neither one. */
   readonly modalityField?: ModalityField
+  /** Reasoning efforts the entry declares, when it declares any: `false` or a level → wire-value dict. */
+  readonly reasoningEfforts?: ReasoningEfforts
 }
 
 /** One provider route and the models its settings namespace declares. */
@@ -67,6 +70,13 @@ export interface ConfiguredRoute {
   readonly preset: boolean
   /** Configuration diagnostic the directory reports for this route. */
   readonly error?: string
+  /**
+   * Whether this route's namespace family accepts a `reasoningEfforts` field on
+   * a model entry. Only the pi-ai adapter's schema declares one, so the field
+   * is offered exactly where it can be written — the same family-probe the
+   * modality field name already is.
+   */
+  readonly reasoningCapable: boolean
   /** Configured models in namespace order. */
   readonly models: readonly ConfiguredModel[]
 }
@@ -132,6 +142,26 @@ function modalities(value: JsonValue | undefined): ModelsDevModality[] {
 }
 
 /**
+ * Read the reasoning efforts one model entry declares.
+ *
+ * `false` is the adapter's own spelling for a non-reasoning model and is kept
+ * as declared; an object keeps the level keys its stored values fit; an empty
+ * dict, `null`, and anything else are forms resolution refuses or reads as
+ * absent, so the entry reports no declaration here either.
+ */
+function reasoningEfforts(value: JsonValue | undefined): ReasoningEfforts | undefined {
+  if (value === false) return false
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const dict: { [level in ReasoningLevel]?: string | null } = {}
+  for (const [key, wire] of Object.entries(value)) {
+    if (!(REASONING_LEVELS as readonly string[]).includes(key)) continue
+    if (wire === null) { dict[key as ReasoningLevel] = null; continue }
+    if (typeof wire === 'string' && wire.length > 0) dict[key as ReasoningLevel] = wire
+  }
+  return Object.keys(dict).length === 0 ? undefined : dict
+}
+
+/**
  * Name the field one model entry stores modalities under.
  *
  * Both families materialize the field while the settings value resolves, so the
@@ -152,13 +182,16 @@ interface ProfileModels {
   readonly arrayLength: number
   /** The readable entries, in array order. */
   readonly models: ConfiguredModel[]
+  /** Whether any entry carries a reasoning-efforts declaration. */
+  readonly reasoningCapable: boolean
 }
 
 /** Read the models one resolved profile declares, in array order. */
 function profileModels(profile: JsonValue | undefined): ProfileModels {
   const raw = asRecord(profile)?.['models']
-  if (!Array.isArray(raw)) return { arrayLength: 0, models: [] }
+  if (!Array.isArray(raw)) return { arrayLength: 0, models: [], reasoningCapable: false }
   const models: ConfiguredModel[] = []
+  let reasoningCapable = false
   raw.forEach((entry, index) => {
     const record = asRecord(entry)
     if (record === undefined) return
@@ -168,6 +201,8 @@ function profileModels(profile: JsonValue | undefined): ProfileModels {
     const contextWindow = capacity(record['contextWindow'])
     const maxTokens = capacity(record['maxTokens'])
     const field = modalityField(record)
+    const efforts = reasoningEfforts(record['reasoningEfforts'])
+    if (efforts !== undefined || field === 'input') reasoningCapable = true
     models.push({
       index,
       id,
@@ -176,9 +211,10 @@ function profileModels(profile: JsonValue | undefined): ProfileModels {
       ...maxTokens === undefined ? {} : { maxTokens },
       inputModalities: field === undefined ? [] : modalities(record[field]),
       ...field === undefined ? {} : { modalityField: field },
+      ...efforts === undefined ? {} : { reasoningEfforts: efforts },
     })
   })
-  return { arrayLength: raw.length, models }
+  return { arrayLength: raw.length, models, reasoningCapable }
 }
 
 /**
@@ -223,7 +259,7 @@ export function readRoutes(
     const view: SettingsNamespaceView | undefined = views.get(entry.settingsNs)
     if (view === undefined) continue
     const profile = atPath(view.value, entry.settingsPath)
-    const { arrayLength, models } = profileModels(profile)
+    const { arrayLength, models, reasoningCapable } = profileModels(profile)
     if (models.length === 0) continue
     const endpoint = routeEndpoint(profile)
     configured.push({
@@ -235,6 +271,7 @@ export function readRoutes(
       revision: view.revision,
       arrayLength: userArrayLength(view, entry.settingsPath, arrayLength),
       preset: entry.declared !== true,
+      reasoningCapable,
       ...entry.error === undefined ? {} : { error: entry.error },
       models,
     })

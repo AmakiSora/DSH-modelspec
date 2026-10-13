@@ -14,7 +14,8 @@ import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { STRATEGY_KEYS, type ModelsDevLocaleKey } from './locales.ts'
-import type { ModelsDevOption, ModelsDevSimilarity } from './types.ts'
+import type { ModelsDevOption, ModelsDevSimilarity, ReasoningEfforts, ReasoningLevel } from './types.ts'
+import { REASONING_LEVELS } from './types.ts'
 import type { ModelPickerState } from './store.ts'
 import css from './ModelsDevPage.module.css'
 
@@ -67,15 +68,41 @@ export interface PickerFields {
   readonly output: string
   /** Whether the model accepts image input; text is always accepted. */
   readonly image: boolean
+  /** Whether the entry declares a non-reasoning model outright. */
+  readonly noReasoning: boolean
+  /** The declared wire value per level; absent levels are empty strings. */
+  readonly efforts: Readonly<Record<ReasoningLevel, string>>
+}
+
+/** The effort fields of an entry that declares nothing. */
+const EMPTY_EFFORTS: Readonly<Record<ReasoningLevel, string>> = Object.fromEntries(
+  REASONING_LEVELS.map(level => [level, '']),
+) as Readonly<Record<ReasoningLevel, string>>
+
+/** Read a stored or published dict into the flat effort fields. */
+export function effortFields(efforts: ReasoningEfforts | undefined): Pick<PickerFields, 'noReasoning' | 'efforts'> {
+  if (efforts === false) return { noReasoning: true, efforts: EMPTY_EFFORTS }
+  if (efforts === undefined) return { noReasoning: false, efforts: EMPTY_EFFORTS }
+  return {
+    noReasoning: false,
+    efforts: {
+      ...EMPTY_EFFORTS,
+      ...Object.fromEntries(
+        Object.entries(efforts).map(([level, wire]) => [level, wire === null ? '' : wire]),
+      ),
+    } as Readonly<Record<ReasoningLevel, string>>,
+  }
 }
 
 /** Read one published entry into the fields, or clear them when it published none. */
 export function fieldsFrom(option: ModelsDevOption | undefined): PickerFields {
+  const efforts = option?.model.declaredEfforts
   return {
     name: option?.model.name ?? '',
     context: option?.model.contextWindow === undefined ? '' : String(option.model.contextWindow),
     output: option?.model.maxOutputTokens === undefined ? '' : String(option.model.maxOutputTokens),
     image: option?.model.inputModalities.includes('image') ?? false,
+    ...effortFields(efforts),
   }
 }
 
@@ -98,6 +125,8 @@ export function upstreamFields(model: LlmDiscoveredModel): PickerFields {
     context: model.contextWindow === undefined ? '' : String(model.contextWindow),
     output: model.maxTokens === undefined ? '' : String(model.maxTokens),
     image: model.inputModalities?.includes('image') ?? false,
+    noReasoning: false,
+    efforts: EMPTY_EFFORTS,
   }
 }
 
@@ -345,15 +374,33 @@ export interface ModelFieldProps {
   readonly t: PickerTranslate
   /** Replace the values. */
   readonly onChange: (fields: PickerFields) => void
+  /** Whether the route's family accepts a reasoning-efforts declaration. */
+  readonly reasoningCapable: boolean
+}
+
+/** Read the flat effort fields back into the dict a model entry declares. */
+export function effortsFromFields(fields: PickerFields): ReasoningEfforts | undefined {
+  if (fields.noReasoning) return false
+  const dict: { [level in ReasoningLevel]?: string | null } = {}
+  for (const level of REASONING_LEVELS) {
+    const wire = fields.efforts[level]
+    if (wire === '') continue
+    dict[level] = level === 'off' && wire.trim() === '' ? null : wire
+  }
+  return Object.keys(dict).length === 0 ? undefined : dict
 }
 
 /**
- * Render the four fields one model entry stores.
+ * Render the fields one model entry stores.
+ *
+ * The effort block only appears where the route's namespace family declares the
+ * field: on the Messages family a write carrying it would be refused by the
+ * schema, so offering it would be an offer the confirm button cannot keep.
  *
  * @param props - the values, and the callback that replaces them.
  * @returns the block element.
  */
-export function ModelFields({ fields, disabled, t, onChange }: ModelFieldProps): ReactNode {
+export function ModelFields({ fields, disabled, t, onChange, reasoningCapable }: ModelFieldProps): ReactNode {
   const change = (next: Partial<PickerFields>): void => { onChange({ ...fields, ...next }) }
   return (
     <>
@@ -393,6 +440,36 @@ export function ModelFields({ fields, disabled, t, onChange }: ModelFieldProps):
         disabled={disabled}
         className={css.addImage}
       />
+      {!reasoningCapable ? null : (
+        <fieldset className={css.efforts} disabled={disabled}>
+          <legend className={css.addFieldName}>{t('fieldEfforts')}</legend>
+          <Checkbox
+            checked={fields.noReasoning}
+            onChange={next => { change({ noReasoning: next }) }}
+            label={t('effortsNonReasoning')}
+            disabled={disabled}
+            className={css.addImage}
+          />
+          {fields.noReasoning
+            ? null
+            : (
+              <div className={css.effortGrid}>
+                {REASONING_LEVELS.map(level => (
+                  <label className={css.addField} key={level}>
+                    <span className={css.addFieldName}>{t(`effort_${level}` as ModelsDevLocaleKey)}</span>
+                    <Input
+                      value={fields.efforts[level]}
+                      placeholder={level === 'off' ? t('effortOffPlaceholder') : t('addModelUnset')}
+                      disabled={disabled || fields.noReasoning}
+                      onChange={event => { change({ efforts: { ...fields.efforts, [level]: event.target.value } }) }}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+          <p className={css.meta}>{t('effortsNote')}</p>
+        </fieldset>
+      )}
     </>
   )
 }

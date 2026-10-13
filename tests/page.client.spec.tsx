@@ -68,6 +68,7 @@ function readyRoute(): ModelsDevState['routes'][number] {
       revision: 3,
       arrayLength: 1,
       preset: false,
+      reasoningCapable: true,
       // The same entry the rows below describe: the add dialog reads the route's
       // own models for its template and its duplicate rule, so a fixture that
       // published rows without them would test an empty route.
@@ -87,7 +88,7 @@ function ready(): ModelsDevState {
     status: 'ready',
     writable: true,
     catalog: {
-      source: 'https://models.dev/api.json',
+      source: 'https://openrouter.ai/api/v1/models',
       fetchedAt: 4242,
       providers: [{ id: 'acme', name: 'Acme', modelCount: 1 }],
       modelCount: 1,
@@ -133,7 +134,7 @@ function panel(state: ModelsDevState): void {
   render(<ModelsDevPage {...props(state)} />)
 }
 
-describe('models.dev page', () => {
+describe('model specs page', () => {
   afterEach(cleanup)
 
   it('reads its configuration once on the first mount', () => {
@@ -144,7 +145,7 @@ describe('models.dev page', () => {
 
   it('shows the catalog address and the counts it compared against', () => {
     panel(ready())
-    expect(screen.getByText(/models\.dev\/api\.json/)).toBeTruthy()
+    expect(screen.getByText(/openrouter\.ai\/api\/v1\/models/)).toBeTruthy()
   })
 
   it('names the field, the stored value, and the published one for each difference', () => {
@@ -196,7 +197,7 @@ describe('models.dev page', () => {
 
   it('says a model already matching the published values is up to date and offers no write', () => {
     panel(withRoute({ ...readyRoute(), models: [row('llm-pi-ai/acme/0', 'acme-1', [])] }))
-    expect(screen.getByText('The local configuration already matches models.dev')).toBeTruthy()
+    expect(screen.getByText('The local configuration already matches the catalog')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull()
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Apply all' }).disabled).toBe(true)
   })
@@ -211,10 +212,10 @@ describe('models.dev page', () => {
         differences: [],
       }],
     }))
-    expect(screen.getByText('models.dev has no matching entry')).toBeTruthy()
+    expect(screen.getByText('The catalog has no matching entry')).toBeTruthy()
   })
 
-  it('reports a route that has no models.dev provider of its own', () => {
+  it('reports a route that has no catalog provider of its own', () => {
     panel(withRoute({
       ...readyRoute(),
       models: [{
@@ -224,7 +225,7 @@ describe('models.dev page', () => {
         differences: [],
       }],
     }))
-    expect(screen.getByText('models.dev has no provider matching this route')).toBeTruthy()
+    expect(screen.getByText('The catalog has no provider matching this route')).toBeTruthy()
   })
 
   it('reports a configured route whose own configuration the directory flags', () => {
@@ -293,13 +294,13 @@ describe('models.dev page', () => {
 
   it('reports the failed read and offers no comparison', () => {
     panel({ ...IDLE, status: 'error', error: 'the server answered HTTP 503' })
-    expect(screen.getByText('The models.dev catalog could not be read')).toBeTruthy()
+    expect(screen.getByText('The model catalog could not be read')).toBeTruthy()
     expect(screen.getByText(/the server answered HTTP 503/)).toBeTruthy()
   })
 
   it('says the panel is loading while the first read runs', () => {
     panel({ ...IDLE, status: 'loading' })
-    expect(screen.getByText(/Reading the models\.dev catalog/)).toBeTruthy()
+    expect(screen.getByText(/Reading the OpenRouter catalog/)).toBeTruthy()
   })
 
   it('reports each write outcome as its own status line', () => {
@@ -463,6 +464,40 @@ describe('adding a model', () => {
     expect((screen.getByLabelText('Accepts image input') as HTMLInputElement).checked).toBe(true)
   })
 
+  it('prefills the reasoning efforts the matched entry published, off carrying no value', () => {
+    panel(adding({
+      modelId: 'acme-2',
+      candidates: [candidate('acme', 'acme-2', { declaredEfforts: { off: null, low: 'low', high: 'high' } })],
+    }))
+    expect(field('low').value).toBe('low')
+    expect(field('high').value).toBe('high')
+    expect(field('off').value).toBe('')
+    expect(field('max').value).toBe('')
+  })
+
+  it('offers no reasoning-effort block on a route whose family declares no such field', () => {
+    const incapable = readyRoute()
+    panel({
+      ...adding(),
+      routes: [{ ...incapable, route: { ...incapable.route, reasoningCapable: false } }],
+    })
+    expect(screen.queryByText('Reasoning efforts')).toBeNull()
+  })
+
+  it('renders the effort fields on a route whose family accepts them, empty by default', () => {
+    panel(adding())
+    expect(screen.getByText('Reasoning efforts')).toBeTruthy()
+    expect((screen.getByLabelText('Non-reasoning model') as HTMLInputElement).checked).toBe(false)
+    expect(field('off').value).toBe('')
+  })
+
+  it('hides the effort fields while a non-reasoning model is declared', () => {
+    panel(adding())
+    fireEvent.click(screen.getByLabelText('Non-reasoning model'))
+    expect(screen.queryByLabelText('low')).toBeNull()
+    expect((screen.getByLabelText('Non-reasoning model') as HTMLInputElement).checked).toBe(true)
+  })
+
   it('shows no chooser at all when only one entry matched', () => {
     panel(adding({ candidates: [candidate('acme', 'acme-2')] }))
     expect(screen.queryByRole('radiogroup')).toBeNull()
@@ -513,7 +548,7 @@ describe('adding a model', () => {
 
   it('falls back to the route default template when nothing matched', () => {
     panel(adding({ modelId: 'never-published', candidates: [] }))
-    expect(screen.getByText(/models\.dev has no matching entry/)).toBeTruthy()
+    expect(screen.getByText(/The catalog has no matching entry/)).toBeTruthy()
     // The donor is the route's only model, so the template is that entry's own
     // capacities: 131072 context, 4096 output, text only, stored under `input`.
     expect(field('Context length').value).toBe('131072')
@@ -523,13 +558,13 @@ describe('adding a model', () => {
 
   it('says a failed lookup fell back to the template rather than reporting nothing', () => {
     panel(adding({ modelId: 'acme-2', candidates: [], error: 'the server answered HTTP 503' }))
-    expect(screen.getByText(/The models\.dev lookup failed/)).toBeTruthy()
+    expect(screen.getByText(/The catalog lookup failed/)).toBeTruthy()
     expect(screen.queryByRole('alert')?.textContent).not.toContain('503')
   })
 
   it('says it is still looking an id up', () => {
     panel(adding({ modelId: 'acme-', searching: true }))
-    expect(screen.getByText(/Looking the model up in models\.dev/)).toBeTruthy()
+    expect(screen.getByText(/Looking the model up in the catalog/)).toBeTruthy()
   })
 
   it('hands over the entry with the modality family its namespace uses', () => {
@@ -869,7 +904,7 @@ describe('adding a model by fuzzy search', () => {
   it('says so when no entry came close, rather than claiming the catalog has none', () => {
     panel(adding({ fuzzy: true, modelId: 'totally-unrelated', candidates: [] }))
     expect(screen.getByText('No entry came close to that id.')).toBeTruthy()
-    expect(screen.queryByText(/models\.dev has no matching entry/)).toBeNull()
+    expect(screen.queryByText(/The catalog has no matching entry/)).toBeNull()
   })
 })
 

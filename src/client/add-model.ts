@@ -12,7 +12,8 @@
 
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { ModelsDevModality } from './types.ts'
+import type { ModelsDevModality, ReasoningEfforts } from './types.ts'
+import { REASONING_LEVELS } from './types.ts'
 import type { ConfiguredRoute, ModalityField } from './configured.ts'
 
 /** The values one new model entry is written from. */
@@ -27,6 +28,8 @@ export interface NewModelEntry {
   readonly maxTokens?: number
   /** Accepted modalities; `text` is always one of them. */
   readonly inputModalities: readonly ModelsDevModality[]
+  /** Reasoning efforts the entry declares, when the route's family accepts one. */
+  readonly reasoningEfforts?: ReasoningEfforts
   /**
    * Field name this namespace family stores modalities under. Absent leaves the
    * field out of the entry entirely, so the adapter's own default applies —
@@ -43,12 +46,19 @@ export interface NewModelTemplate {
   readonly maxTokens?: number
   /** Accepted modalities of the donor model; `text` when it declared none. */
   readonly inputModalities: readonly ModelsDevModality[]
+  /** Reasoning efforts of the donor model, when it declared any. */
+  readonly reasoningEfforts?: ReasoningEfforts
   /** Field name the route's namespace family stores modalities under. */
   readonly modalityField?: ModalityField
 }
 
 /** Why one draft cannot be written into a route. */
-export type NewModelProblem = 'empty-id' | 'duplicate-id' | 'invalid-context' | 'invalid-output'
+export type NewModelProblem =
+  | 'empty-id'
+  | 'duplicate-id'
+  | 'invalid-context'
+  | 'invalid-output'
+  | 'invalid-efforts'
 
 /**
  * Fill a dialog from the route's own configuration.
@@ -65,7 +75,8 @@ export type NewModelProblem = 'empty-id' | 'duplicate-id' | 'invalid-context' | 
  */
 export function newModelTemplate(route: ConfiguredRoute): NewModelTemplate {
   const donor = [...route.models].reverse()
-    .find(model => model.contextWindow !== undefined || model.maxTokens !== undefined)
+    .find(model => model.contextWindow !== undefined || model.maxTokens !== undefined
+      || model.reasoningEfforts !== undefined)
     ?? route.models[route.models.length - 1]
   if (donor === undefined) return { inputModalities: ['text'] }
   return {
@@ -74,6 +85,7 @@ export function newModelTemplate(route: ConfiguredRoute): NewModelTemplate {
     // An entry that declares an empty modality list inherits the route's, so
     // the template names `text` rather than starting the new entry at nothing.
     inputModalities: donor.inputModalities.length === 0 ? ['text'] : [...donor.inputModalities],
+    ...donor.reasoningEfforts === undefined ? {} : { reasoningEfforts: donor.reasoningEfforts },
     ...donor.modalityField === undefined ? {} : { modalityField: donor.modalityField },
   }
 }
@@ -96,7 +108,13 @@ export function addModelOps(route: ConfiguredRoute, entry: NewModelEntry): Setti
   if (entry.contextWindow !== undefined) value['contextWindow'] = entry.contextWindow
   if (entry.maxTokens !== undefined) value['maxTokens'] = entry.maxTokens
   if (entry.modalityField !== undefined) value[entry.modalityField] = [...entry.inputModalities]
+  if (entry.reasoningEfforts !== undefined) value['reasoningEfforts'] = effortsValue(entry.reasoningEfforts)
   return [{ op: 'set', path: [...route.settingsPath, 'models', String(route.arrayLength)], value }]
+}
+
+/** The JSON value a reasoning-efforts declaration is written as. */
+function effortsValue(efforts: ReasoningEfforts): JsonValue {
+  return efforts === false ? false : { ...efforts }
 }
 
 /** Whether a capacity is one both adapters accept: a positive integer. */
@@ -121,5 +139,19 @@ export function newModelProblem(route: ConfiguredRoute, entry: NewModelEntry): N
   if (route.models.some(model => model.id === id)) return 'duplicate-id'
   if (badCapacity(entry.contextWindow)) return 'invalid-context'
   if (badCapacity(entry.maxTokens)) return 'invalid-output'
+  if (!usableEfforts(entry.reasoningEfforts)) return 'invalid-efforts'
   return undefined
+}
+
+/**
+ * Mirror the adapter's own resolution rule for a declared dict: an entry that
+ * offers no level beyond `off` — every other level absent or valueless — is one
+ * the namespace refuses, so the panel refuses it here with the reason named.
+ * `false` and an absent declaration are always usable.
+ * @param efforts - the draft's declaration.
+ * @returns whether the adapter would accept it.
+ */
+function usableEfforts(efforts: ReasoningEfforts | undefined): boolean {
+  if (efforts === undefined || efforts === false) return true
+  return REASONING_LEVELS.some(level => level !== 'off' && (efforts[level] ?? '') !== '')
 }

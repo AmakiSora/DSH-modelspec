@@ -21,7 +21,7 @@ import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { newModelProblem, newModelTemplate, type NewModelEntry, type NewModelProblem } from './add-model.ts'
 import { type ModelsDevLocaleKey } from './locales.ts'
 import {
-  CandidatePicker, ModelFields, fieldsFrom, optionKey, upstreamFields,
+  CandidatePicker, ModelFields, effortFields, effortsFromFields, fieldsFrom, optionKey, upstreamFields,
   type PickerFields, type PickerTranslate, type UpstreamProbe,
 } from './ModelPicker.tsx'
 import type { ModelPickerState, RouteView } from './store.ts'
@@ -55,6 +55,7 @@ const PROBLEM_KEYS = {
   'duplicate-id': 'addProblemDuplicate',
   'invalid-context': 'addProblemContext',
   'invalid-output': 'addProblemOutput',
+  'invalid-efforts': 'addProblemEfforts',
 } satisfies Record<NewModelProblem, ModelsDevLocaleKey>
 
 /**
@@ -74,7 +75,10 @@ export function AddModelDialog({
   const [modelId, setModelId] = useState('')
   const [chosen, setChosen] = useState<string | null>(null)
   const [upstream, setUpstream] = useState<LlmDiscoveredModel | null>(null)
-  const [fields, setFields] = useState<PickerFields>({ name: '', context: '', output: '', image: false })
+  const [fields, setFields] = useState<PickerFields>(() => ({
+    name: '', context: '', output: '', image: false, noReasoning: false,
+    efforts: Object.fromEntries(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map(level => [level, ''])) as PickerFields['efforts'],
+  }))
 
   const template = useMemo(() => newModelTemplate(route.route), [route])
   // The chosen entry, or the only one the catalog answered with: a lone match is
@@ -102,12 +106,14 @@ export function AddModelDialog({
     setFields(source.fields)
   })
 
+  const efforts = route.route.reasoningCapable ? effortsFromFields(fields) : undefined
   const draft: NewModelEntry = {
     id: modelId,
     ...fields.name.trim() === '' ? {} : { name: fields.name },
     ...fields.context.trim() === '' ? {} : { contextWindow: Number(fields.context) },
     ...fields.output.trim() === '' ? {} : { maxTokens: Number(fields.output) },
     inputModalities: fields.image ? ['text', 'image'] : ['text'],
+    ...efforts === undefined ? {} : { reasoningEfforts: efforts },
     ...template.modalityField === undefined ? {} : { modalityField: template.modalityField },
   }
   const problem = newModelProblem(route.route, draft)
@@ -175,7 +181,10 @@ export function AddModelDialog({
           onConfirm={submit}
           upstream={probe}
         />
-        <ModelFields fields={fields} disabled={disabled} t={t} onChange={setFields} />
+        <ModelFields
+          fields={fields} disabled={disabled} t={t} onChange={setFields}
+          reasoningCapable={route.route.reasoningCapable}
+        />
         {!named || problem === undefined ? null : (
           <p className={css.diagnostic} role="alert">{t(PROBLEM_KEYS[problem])}</p>
         )}
@@ -191,5 +200,6 @@ function templateFields(template: ReturnType<typeof newModelTemplate>): PickerFi
     context: template.contextWindow === undefined ? '' : String(template.contextWindow),
     output: template.maxTokens === undefined ? '' : String(template.maxTokens),
     image: template.inputModalities.includes('image'),
+    ...effortFields(template.reasoningEfforts),
   }
 }

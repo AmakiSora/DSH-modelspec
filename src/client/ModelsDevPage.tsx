@@ -12,6 +12,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { FieldDifference } from './comparison.ts'
+import type { ModelsDevModality, ReasoningEfforts } from './types.ts'
 import { FIELD_KEYS, STRATEGY_KEYS } from './locales.ts'
 import type { ModelRowView, ModelsDevFace, ModelsDevState, RouteView, WriteNotice } from './store.ts'
 import { AddModelDialog } from './AddModelDialog.tsx'
@@ -28,12 +29,27 @@ export type ModelsDevPageProps =
 /** The page's dictionary seat. */
 type Translate = ModelsDevPageProps['t']
 
+/** The stored value one efforts dict renders as, in level order. */
+function effortsText(value: Exclude<ReasoningEfforts, undefined>, t: Translate): string {
+  if (value === false) return t('diffEffortsOffFalse')
+  const parts = Object.entries(value)
+    .sort(([left], [right]) => LEVEL_ORDER.indexOf(left) - LEVEL_ORDER.indexOf(right))
+    .map(([level, wire]) => (wire === null ? `${level}∅` : `${level}=${String(wire)}`))
+  return parts.length === 0 ? t('diffEffortsNone') : parts.join(' ')
+}
+
+/** The escalation order the effort levels render in. */
+const LEVEL_ORDER = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
 /** One stored value rendered the way the panel shows it. */
 function valueText(difference: FieldDifference, side: 'configured' | 'published', t: Translate): string {
   const value = difference[side]
   if (value === undefined) return t('unset')
   if (typeof value === 'number') return String(value)
-  return value.map(modality => t(modality === 'image' ? 'modalityImage' : 'modalityText')).join(' + ')
+  if (difference.field === 'reasoningEfforts') return effortsText(value as Exclude<ReasoningEfforts, undefined>, t)
+  return (value as readonly ModelsDevModality[])
+    .map(modality => t(modality === 'image' ? 'modalityImage' : 'modalityText'))
+    .join(' + ')
 }
 
 /** The status line one write outcome renders. */
