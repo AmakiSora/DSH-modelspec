@@ -3,14 +3,21 @@
  *
  * A dsh profile installs a third-party plugin as a plain dependency pointing at
  * this directory, so the staged copy is what the profile's resolver reads. It
- * carries only the two runtime artifacts and a manifest with no dependencies:
- * the browser bundle inlines everything the shell does not share, so a
- * dependency list here would only invite a second copy of a shared runtime.
+ * carries only the runtime artifacts, the bundle patch, and a manifest with no
+ * dependencies: the browser bundle inlines everything the shell does not share,
+ * so a dependency list here would only invite a second copy of a shared runtime.
  *
- * The staged manifest is a re-emission of the package manifest, so both the name
- * and the version are read from package.json rather than restated here: a number
- * that changes every release has no business living in two files. The directory
- * follows the name because it is the path a profile's dependency key points at.
+ * The patch travels with the artifacts because it is what makes this directory
+ * installable the way dsh installs a plugin: a package that declares no
+ * `dsh.bundle` is refused before it is ever composed, and a declared patch whose
+ * file is missing has no layer to apply.
+ *
+ * The staged manifest is a re-emission of the package manifest, so the name, the
+ * version, and the `dsh` section are read from package.json rather than restated
+ * here: a fact that changes every release has no business living in two files,
+ * and a hand-copied `dsh` block is one that can drift from the published one. The
+ * directory follows the name because it is the path a profile's dependency key
+ * points at.
  *
  * The bundle's own registration id is *not* read from here. It is declared in
  * tsdown.config.ts, and `tests/release.spec.ts` fails if the two disagree.
@@ -29,9 +36,9 @@ const OUT = process.argv.includes('--out')
   : join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.dsh', 'plugins', NAME)
 
 /** Artifacts the profile needs, relative to the project root. */
-const ARTIFACTS = ['lib/index.js', 'lib/client.js', 'lib/client.js.map']
+const ARTIFACTS = ['lib/index.js', 'lib/client.js', 'lib/client.js.map', 'cordis.patch.yml']
 
-/** The staged manifest: the entry points, the client manifest, and nothing else. */
+/** The staged manifest: the entry points, the bundle declaration, and nothing else. */
 const MANIFEST = {
   name: NAME,
   version: PACKAGE.version,
@@ -41,19 +48,10 @@ const MANIFEST = {
   exports: {
     '.': './lib/index.js',
     './client': './lib/client.js',
+    './cordis.patch.yml': './cordis.patch.yml',
     './package.json': './package.json',
   },
-  dsh: {
-    client: {
-      inject: [
-        '@deepseek-ai/dsh-api-remotes',
-        '@deepseek-ai/dsh-client-locale',
-        '@deepseek-ai/dsh-client-ui-layout',
-        '@deepseek-ai/dsh-client-ui-sidebar',
-      ],
-      platform: 'web',
-    },
-  },
+  dsh: PACKAGE.dsh,
 }
 
 await rm(OUT, { recursive: true, force: true })

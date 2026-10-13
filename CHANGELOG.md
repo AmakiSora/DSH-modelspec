@@ -8,10 +8,29 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-13
+
 ### Added
 
 - An MIT `LICENSE` file. The package manifest declared MIT from the start, but the text
   itself was missing, and a manifest field with no file behind it grants nothing.
+- A bundle layer, so the plugin installs the way dsh installs a plugin: the package declares
+  `dsh.bundle.patch` and ships the `cordis.patch.yml` that inserts its own row. Selecting the
+  bundle is now the whole installation — no patch written by hand, and the patch travels with
+  the package instead of being retyped into each profile.
+- A `prepublishOnly` build, so the tarball published to the registry cannot be one built from
+  an older source tree.
+
+### Changed
+
+- The package is publishable: `private` is gone, and `files` ships both runtime artifacts and
+  the bundle patch alongside them.
+- **A profile that installed an earlier release must not keep its hand-written insert.** The
+  shipped patch inserts the same row, so a profile with both the bundle selected and
+  `- insert: - id: dsh-modelspec` written into `cordis.patch.yml` composes the row twice.
+  Keep one: select the bundle, or keep the manual pair and leave the bundle unselected.
+- `pnpm run stage` now stages `cordis.patch.yml` too, and the staged manifest carries the
+  package's own `dsh` section rather than a hand-copied one.
 
 ## [0.1.0] - 2026-10-12
 
@@ -40,6 +59,7 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - Specs over the matching, the write paths, the browser-local bindings, and the rendered
   page.
 
-[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.2.0
 [0.1.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.1.0
 [models.dev]: https://models.dev

@@ -1,8 +1,8 @@
 # Working in this repository
 
-Conventions for anyone — human or agent — changing `dsh-modelspec`. They exist because
-three facts about a release are stated in more than one place, and every pair is a way for
-the project to quietly disagree with itself.
+Conventions for anyone — human or agent — changing `dsh-modelspec`. They exist because a
+release's name, version and tag are each stated in more than one place, and every pair is a
+way for the project to quietly disagree with itself.
 
 Read [README.md](README.md) for what the plugin does and why it is shaped the way it is.
 This file is about how to change it.
@@ -33,8 +33,11 @@ it but the changelog and the tag.
 SemVer requires a project to define one before version numbers mean anything. For this
 plugin that is:
 
-- the package name and the identity the bundle registers under;
-- the profile install contract: the staged manifest's shape and its `dsh.client` entry;
+- the package name, the identity the bundle registers under, and the row the shipped
+  `cordis.patch.yml` inserts — a profile's selection, its overrides and its disables all
+  address that row;
+- the profile install contract: the staged manifest's shape, its `dsh.bundle` declaration and
+  its `dsh.client` entry;
 - the panel's user-visible behaviour, including which writes it refuses;
 - the browser-local storage format behind pinned entry sources. Changing the key prefix or
   the shape orphans what a reader has already chosen, which is a breaking change even
@@ -73,11 +76,16 @@ single feature is allowed to roll the version into it by accident, which is why
 4. Tag it: `git tag -a vX.Y.Z -m 'X.Y.Z'`. The tag is `vX.Y.Z`; the version is `X.Y.Z` —
    the `v` is part of the tag, not of the version.
 5. `pnpm run build && pnpm run stage`.
+6. Publish it: `pnpm publish` (or `npm publish`). `files` decides what the tarball carries and
+   `prepublishOnly` rebuilds before it is packed, so a published version cannot be a stale
+   `lib/`. A version publishes once — bump it rather than retrying the same number.
 
 `tests/release.spec.ts` fails when the version in `package.json` has no changelog heading,
 when the changelog's compare link has not moved with it, when the entry is undated or
-carries a category the format does not define, and when the bundle would register under a
-name the package does not declare. It is the checklist, executable.
+carries a category the format does not define, when the bundle would register under a name
+the package does not declare, when the shipped bundle layer inserts a row the package does
+not, and when `files` has stopped carrying the artifacts a profile loads. It is the
+checklist, executable.
 
 ## Commit messages
 
@@ -132,17 +140,19 @@ id is the plugin's runtime identity, and a package published under an npm scope 
 silently rename the plugin every existing profile refers to. `tests/release.spec.ts` asserts
 they are equal, so they cannot drift apart unnoticed.
 
-Renaming is therefore a coordinated change, and four things move together:
+Renaming is therefore a coordinated change, and five things move together:
 
 1. `package.json`'s `name`;
 2. `PACKAGE` in `tsdown.config.ts`;
-3. the storage prefix in `src/client/bindings.ts` — and the old prefix must stay readable,
+3. the row `cordis.patch.yml` inserts — its id and the module name, both of which are the
+   package name, so a profile's selection, override and disable all keep addressing it;
+4. the storage prefix in `src/client/bindings.ts` — and the old prefix must stay readable,
    or every entry a reader has pinned is silently lost;
-4. the install instructions in `README.md`.
+5. the install instructions in `README.md`.
 
 `scripts/stage.mjs` follows the package name on its own. A profile that already installed
-the plugin needs its `package.json` dependency key and its `cordis.patch.yml` id updated by
-hand; say so in the changelog.
+the plugin needs its `package.json` dependency key, its bundle selection, and any
+`cordis.patch.yml` id it wrote itself updated by hand; say so in the changelog.
 
 ## Do not break these
 
@@ -161,6 +171,15 @@ release to learn.
 - **The browser bundle imports nothing cross-plugin.** `SHARED_MODULES` in `tsdown.config.ts`
   is the whole list of specifiers the shell answers; the purity plugin rejects the rest at
   build time.
+- **The packaged bundle declares the layer it installs as, and carries it.** dsh refuses a
+  package that declares no `dsh.bundle`, and it resolves the patch as a path inside the
+  installed package — so a manifest without the declaration, or a `files` list that leaves
+  the patch out of the tarball, produces an install that fails after pnpm has already
+  succeeded, with the profile's dependency silently rolled back. `tests/release.spec.ts` pins
+  all three.
+- **A profile composes that row once.** Selecting the bundle applies the shipped patch, and an
+  `- insert: - id: dsh-modelspec` block written into a profile's own `cordis.patch.yml` is
+  the same row: a profile that does both composes two entries under one id.
 - **Components hold no Host access.** Host reads and writes live in `src/client/store.ts`;
   a component receives plain data and callbacks.
 

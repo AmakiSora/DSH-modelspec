@@ -106,7 +106,9 @@ as hidden state for an id the route no longer stores.
 ## Requirements
 
 Dsh `0.2.1-alpha.2` or later. The plugin is built against the published `@deepseek-ai/dsh-*`
-packages at that version and relies on the web shell's client module table.
+packages at that version and relies on the web shell's client module table. Installing it needs a
+profile whose app supplies the plugin manager — the shipped `@deepseek-ai/dsh-base` plus web app
+do — because the plugin is installed as a bundle rather than by editing the profile by hand.
 
 ## Build
 
@@ -118,18 +120,37 @@ pnpm run typecheck
 pnpm run lint
 ```
 
-`pnpm run build` produces three artifacts:
+`pnpm run build` produces the runtime artifacts, and `cordis.patch.yml` ships beside them as it
+is written:
 
 | File | Role |
 | --- | --- |
 | `lib/index.js` | node half — an empty `apply()`, present so the host Loader can import the package |
 | `lib/client.js` | the browser bundle the shell loads |
 | `lib/types/**/*.d.ts` | type declarations |
+| `cordis.patch.yml` | the bundle layer: the one row a profile composes |
 
 ## Install into a profile
 
-`pnpm run stage` copies the built artifacts into `~/.dsh/plugins/dsh-modelspec` and writes a
-dependency-free manifest there. Then point a profile at it:
+The package is a dsh **bundle**. It declares `dsh.bundle.patch` and ships the `cordis.patch.yml`
+that inserts its own row, so installing it selects the layer that puts the panel in a profile's
+composition, and no patch is written by hand.
+
+Install `dsh-modelspec` from the Web sidebar's **Plugins** page. The `plugin_manager` tool's
+`install_bundle` and the `dsh plugin` command do the same thing, from a name, a path, a tarball,
+or a git address. Then open **Model specs** in the sidebar; a live profile recomposes on its own,
+a startup-only one needs a restart.
+
+**Selecting the bundle and writing the insert by hand are alternatives, not steps.** A profile
+that has an `- insert: - id: dsh-modelspec` block of its own — every install before this bundle
+layer existed — composes the row a second time once the bundle is selected. Remove the block, or
+leave the bundle unselected.
+
+### A local build instead
+
+`pnpm run stage` copies the artifacts and the patch into `~/.dsh/plugins/dsh-modelspec` and
+writes a dependency-free manifest there. That directory is what `install_bundle` accepts as a
+path; a profile can also be pointed at it by hand:
 
 `~/.dsh/profiles/<name>/package.json`
 
@@ -137,29 +158,25 @@ dependency-free manifest there. Then point a profile at it:
 {
   "dependencies": {
     "dsh-modelspec": "link:C:/Users/<you>/.dsh/plugins/dsh-modelspec"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-modelspec"]
+    }
   }
 }
 ```
 
-`~/.dsh/profiles/<name>/cordis.patch.yml`
-
-```yaml
-- insert:
-    - id: dsh-modelspec
-      name: 'dsh-modelspec'
-```
-
-The three names are one identity: the staged manifest's `name` is the dependency key, the
-staged directory is the path that key points at, and the plugin registers itself under the
-name `tsdown.config.ts` hardcodes. Rename all three together or the profile and the bundle
-stop agreeing.
+Four names are one identity: the staged manifest's `name` is the dependency key, the staged
+directory is the path that key points at, `tsdown.config.ts`'s `PACKAGE` is the id the browser
+bundle registers under, and the shipped patch's inserted row is the entry a profile composes.
+Rename them together or the profile and the bundle stop agreeing; a profile that already
+installed the plugin needs its dependency key and bundle selection updated by hand.
 
 Earlier installs of this panel were named `model-aid`. After renaming, a profile's
 `package.json` and `cordis.patch.yml` need the new key and id, and the old
 `~/.dsh/plugins/model-aid` directory is no longer read. Entry sources a browser had pinned
 under the old name are carried across on first use, so nothing is silently unpinned.
-
-Restart the host, then open **Model specs** in the sidebar.
 
 Use `node scripts/stage.mjs --out <dir>` to stage somewhere else.
 
@@ -201,6 +218,13 @@ Each release then gets a section in [CHANGELOG.md](CHANGELOG.md) written for a r
 than generated from the log: the `Added` / `Changed` / `Fixed` / `Removed` categories from
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), an ISO date, and a `vX.Y.Z` tag.
 
+Publishing is then `pnpm publish` (or `npm publish`). `files` decides what the tarball carries,
+and `prepublishOnly` rebuilds before it is packed, so a version cannot be published from a stale
+`lib/` — the mistake that ships a manifest whose imports do not exist. The tag is pushed after
+the publish, and the version in `package.json`, the changelog section describing it and the tag
+are the same number; [tests/release.spec.ts](tests/release.spec.ts) is that checklist,
+executable.
+
 The project is on `0.y.z`, which under [Semantic Versioning](https://semver.org/) means the
 public API is not promised stable yet — fitting for a plugin built against a `0.2.1-alpha`
 of dsh. `1.0.0` is the release to make once the panel's behaviour has been relied on.
@@ -224,6 +248,7 @@ src/client/AddModelDialog.tsx the add-model dialog
 src/client/EditModelDialog.tsx the edit-model dialog
 src/client/RemoveModelDialog.tsx the removal confirmation
 src/client/locales.ts        zh + en dictionaries
+cordis.patch.yml             the bundle layer: the row a profile composes
 tests/                       the specs: matching, write paths, bindings, and the page
 CHANGELOG.md                 one section per release, written for a reader
 AGENTS.md                    the versioning, commit and changelog conventions

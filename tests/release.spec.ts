@@ -3,7 +3,8 @@
  *
  * Every fact here is stated in more than one file, and each pair is a way the
  * project can quietly disagree with itself: a bundle that registers under a name
- * its package no longer declares, a version in the manifest that no changelog
+ * its package no longer declares, a bundle layer whose row loads a module the
+ * published package does not carry, a version in the manifest that no changelog
  * section describes, a tag nobody can place. None of that is visible from a code
  * review, and all of it is visible from here.
  *
@@ -25,10 +26,21 @@ function source(relative: string): string {
 }
 
 /** The package manifest, which is the source of the name and the version. */
-const manifest = JSON.parse(source('package.json')) as { name: string; version: string; license?: string }
+const manifest = JSON.parse(source('package.json')) as {
+  name: string
+  version: string
+  license?: string
+  private?: boolean
+  main?: string
+  files?: string[]
+  dsh?: { bundle?: { patch?: string } }
+}
 
 /** The changelog, as written. */
 const changelog = source('CHANGELOG.md')
+
+/** The bundle patch, as written. */
+const patch = source('cordis.patch.yml')
 
 /**
  * The value one `const NAME = '…'` declaration holds, wherever it is declared.
@@ -40,12 +52,58 @@ function declared(text: string, constant: string): string | undefined {
   return new RegExp(`const ${constant} = '([^']+)'`).exec(text)?.[1]
 }
 
+/**
+ * The one row the bundle patch inserts, as its id and the module it names.
+ * @param text - the patch, as written.
+ * @returns the pair, or `undefined` when the patch inserts no such row.
+ */
+function insertedRow(text: string): [string, string] | undefined {
+  const match = /- id: (\S+)\s*\n\s+name: '([^']+)'/.exec(text)
+  return match === null ? undefined : [match[1], match[2]]
+}
+
 describe('release metadata', () => {
   it('names the bundle and the package the same thing', () => {
     // The two are declared separately on purpose: the registration id is the
     // plugin's runtime identity, and a package published under an npm scope must
     // not silently rename the plugin every install already refers to.
     expect(declared(source('tsdown.config.ts'), 'PACKAGE')).toBe(manifest.name)
+  })
+
+  it('declares the bundle layer dsh installs it as', () => {
+    // dsh installs a plugin by selecting a bundle, and refuses a package that
+    // declares none — after pnpm has already succeeded, so the profile's
+    // dependency is added and then rolled back with only a message to explain
+    // it. The patch is resolved as a path inside the installed package, which
+    // makes its presence in `files` part of the same requirement.
+    expect(manifest.private).not.toBe(true)
+    expect(manifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
+    expect(manifest.files).toContain('cordis.patch.yml')
+  })
+
+  it('inserts the row the package registers under', () => {
+    // A row naming a module the bundle does not register, or entered under an id
+    // no override can address, is a plugin that silently does not appear.
+    expect(insertedRow(patch)).toEqual([manifest.name, declared(source('tsdown.config.ts'), 'PACKAGE')])
+  })
+
+  it('publishes the artifacts a profile loads', () => {
+    // `files` is what npm packs. The two halves are loaded separately — the
+    // node half by the Loader importing the package, the browser half by the
+    // shell fetching the `./client` entry — so a tarball missing either one
+    // installs successfully and then has nothing to compose.
+    expect(manifest.files).toContain('lib/index.js')
+    expect(manifest.files).toContain('lib/client.js')
+    expect(manifest.main).toBe('lib/index.js')
+  })
+
+  it('stages the patch and both artifacts beside the manifest', () => {
+    // The staged directory is installed as the package itself, so it has to
+    // carry everything `files` promises the registry copy.
+    const staging = source('scripts/stage.mjs')
+    for (const staged of ["'lib/index.js'", "'lib/client.js'", "'cordis.patch.yml'"]) {
+      expect(staging).toContain(staged)
+    }
   })
 
   it('stages under the name the package declares', () => {
