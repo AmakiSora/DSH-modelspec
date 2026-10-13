@@ -122,6 +122,10 @@ export function EditModelDialog({
       title={t('editModelTitle')}
       closeLabel={t('addModelClose')}
       description={t('editModelDescription', { provider: route.route.displayName, model: row.model.id })}
+      // Asserted for the same reason as the add dialog's: a CSS-module key is
+      // possibly undefined, and the editor carries the same picker and fields.
+      className={css.pickerDialog as string}
+      contentClassName={css.pickerContent as string}
       footer={(
         <>
           <Button variant="outline" onClick={onClose}>{t('addModelCancel')}</Button>

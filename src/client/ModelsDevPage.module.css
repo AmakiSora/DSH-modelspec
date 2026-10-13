@@ -299,6 +299,25 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* The picker card, shared by the add dialog and the editor. It is wider than
+   the shared 380px default because one row carries a name, an id, its provider,
+   and two capacities — and the upstream listing adds a row of its own — and it
+   is capped against the overlay's padding box rather than the viewport, which
+   is the box the card is laid out in. */
+.pickerDialog {
+  width: min(560px, 100%);
+  max-height: 100%;
+}
+
+/* The region that scrolls when the card is capped: a listing of dozens of
+   entries, the field block under it, and a short window are enough to push the
+   footer off the bottom of the screen, where nothing can reach it. The footer
+   is a sibling of this region, so it stays where it is while this one scrolls. */
+.pickerContent {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* The add-model dialog body: one column, so the id sits above the values it
    filled rather than beside it, and the chooser gets the full width its model
    names need. */
@@ -360,12 +379,14 @@
 }
 
 /* The chooser scrolls rather than growing: an id several providers publish can
-   reach dozens of entries, and the dialog's own footer has to stay reachable. */
+   reach dozens of entries, and the dialog's own footer has to stay reachable.
+   Its cap follows a short window down, so the card's own region keeps the room
+   to scroll rather than being filled by one list nested inside it. */
 .candidates {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 200px;
+  max-height: min(200px, 30vh);
   margin: 0;
   padding: 4px;
   overflow-y: auto;
@@ -376,7 +397,11 @@
 
 .candidate {
   display: grid;
-  grid-template-columns: 1fr auto;
+  /* The name column may go narrower than its own text: a gateway publishes
+     ids like `SenseNova/deepseek-v4-flash`, and a grid item that refuses to
+     shrink below its min-content width pushes the row — and the scrollable
+     region it sits in — wider than the card. Both columns wrap instead. */
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px 8px;
   width: 100%;
   padding: 8px;
@@ -405,12 +430,14 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
 }
 
 .candidateId {
   grid-column: 1;
   font-size: 11px;
   color: var(--dsw-alias-label-tertiary);
+  overflow-wrap: anywhere;
 }
 
 .candidateMeta {

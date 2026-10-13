@@ -165,22 +165,31 @@ export interface ModalProps {
   readonly description?: string
   readonly children?: ReactNode
   readonly footer?: ReactNode
+  readonly className?: string
+  readonly contentClassName?: string
 }
 
 /**
  * A real `role="dialog"` carrying the title as its accessible name, so the
  * specs can open and identify the add-model dialog exactly as the reader does.
- * The portal and focus handling the real control owns are not under test here.
+ * The portal and focus handling the real control owns are not under test here,
+ * but its shape is: the card takes `className`, and `contentClassName` lands on
+ * the region that holds the header and body — the one a capped card scrolls —
+ * while the footer stays a sibling of it.
  */
-export function Modal({ open, onClose, title, closeLabel, description, children, footer }: ModalProps): ReactNode {
+export function Modal({
+  open, onClose, title, closeLabel, description, children, footer, className, contentClassName,
+}: ModalProps): ReactNode {
   if (!open) return null
   return (
-    <div role="dialog" aria-modal="true" aria-label={title}>
-      {closeLabel === undefined ? null : (
-        <button type="button" aria-label={closeLabel} onClick={onClose} />
-      )}
-      {description === undefined ? null : <p>{description}</p>}
-      {children}
+    <div role="dialog" aria-modal="true" aria-label={title} className={className}>
+      <div className={contentClassName}>
+        {closeLabel === undefined ? null : (
+          <button type="button" aria-label={closeLabel} onClick={onClose} />
+        )}
+        {description === undefined ? null : <p>{description}</p>}
+        {children}
+      </div>
       {footer}
     </div>
   )

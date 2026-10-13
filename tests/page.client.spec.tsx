@@ -596,6 +596,20 @@ describe('adding a model', () => {
     expect(screen.getByText('The model acme-2 was added.')).toBeTruthy()
   })
 
+  it('caps and scrolls the card rather than growing past a short window', () => {
+    // A listing of fifty-four models above four fields is taller than a laptop
+    // window; uncapped, the card is centered and clipped, which puts the title
+    // and the actions out of reach. The card is capped and the region that
+    // scrolls is the one the primitive wraps the header and body in — not the
+    // one holding the actions.
+    panel(adding({ discovered: [served('acme-2')] }))
+    const card = dialog()
+    expect(card.className).toContain('pickerDialog')
+    const region = card.querySelector('[class*="pickerContent"]')
+    expect(region).not.toBeNull()
+    expect(region?.contains(screen.getByRole('button', { name: 'Add' }))).toBe(false)
+  })
+
   it('asks the route which models it serves, and asks nothing by itself', () => {
     const injected = props(adding())
     render(<ModelsDevPage {...injected} />)

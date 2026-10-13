@@ -148,6 +148,11 @@ export function AddModelDialog({
       title={t('addModelTitle')}
       closeLabel={t('addModelClose')}
       description={t('addModelDescription', { provider: route.route.displayName })}
+      // The two class names are asserted rather than optional: a CSS-module key
+      // is possibly undefined under this project's declarations, and a card that
+      // silently fell back to the shared default would be the narrow one again.
+      className={css.pickerDialog as string}
+      contentClassName={css.pickerContent as string}
       footer={(
         <>
           <Button variant="outline" onClick={onClose}>{t('addModelCancel')}</Button>
