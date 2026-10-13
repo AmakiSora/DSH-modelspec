@@ -1,0 +1,70 @@
+# Publish the tagged version to npm.
+#
+# A release is published by pushing its tag — `git tag -a vX.Y.Z -m 'X.Y.Z'`
+# then `git push --follow-tags` — rather than from a terminal, because the
+# registry is what is unreachable from a network that can still reach GitHub.
+# The runner is not behind that network.
+#
+# The workflow is read from the ref it runs on, so it has to be on the commit
+# that is tagged: land it on `main` before cutting the next release.
+#
+# It needs one repository secret, set once:
+#
+#   NPM_TOKEN — a granular access token with `bypass 2FA` enabled (or a classic
+#   automation token). Without bypass, npm answers 403 whatever else is right,
+#   because a run cannot answer a one-time-password prompt.
+#
+# `workflow_dispatch` publishes the version package.json declares on the ref
+# chosen in the Actions UI, which is how a release whose tag was pushed before
+# this workflow existed gets published.
+
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the runtime the plugin is developed and staged against.
+          node-version: 24
+          # Writes the registry and the `${NODE_AUTH_TOKEN}` placeholder that
+          # `pnpm publish` reads back through the secret below.
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The same three commands the repository asks for before a commit, run
+      # once more against exactly what is about to be published.
+      - name: Check the release metadata
+        run: |
+          pnpm run lint
+          pnpm run typecheck
+          pnpm test
+
+      - name: Check the tag names the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node -e "const v = require('./package.json').version; const tag = process.env.GITHUB_REF_NAME; if (tag !== 'v' + v) { console.error('tag ' + tag + ' does not name version ' + v); process.exit(1) }"
+
+      # `--no-git-checks` because a tag push is a detached HEAD. `prepublishOnly`
+      # rebuilds `lib/`, and `files` decides the tarball, so neither a stale
+      # build nor a missing bundle patch can be published from here.
+      - run: pnpm publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -218,12 +218,16 @@ Each release then gets a section in [CHANGELOG.md](CHANGELOG.md) written for a r
 than generated from the log: the `Added` / `Changed` / `Fixed` / `Removed` categories from
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), an ISO date, and a `vX.Y.Z` tag.
 
-Publishing is then `pnpm publish` (or `npm publish`). `files` decides what the tarball carries,
-and `prepublishOnly` rebuilds before it is packed, so a version cannot be published from a stale
-`lib/` — the mistake that ships a manifest whose imports do not exist. The tag is pushed after
-the publish, and the version in `package.json`, the changelog section describing it and the tag
-are the same number; [tests/release.spec.ts](tests/release.spec.ts) is that checklist,
-executable.
+Publishing is the tag push: `.github/workflows/publish.yml` runs the specs, checks that the tag
+names the version in `package.json`, and publishes from the runner — which is not behind the
+network the registry is unreachable from here. Running `pnpm publish` in a terminal does the same
+thing when the registry *is* reachable. Either way `files` decides what the tarball carries and
+`prepublishOnly` rebuilds before it is packed, so a version cannot be published from a stale
+`lib/` — the mistake that ships a manifest whose imports do not exist. The workflow needs one
+repository secret, `NPM_TOKEN`: a granular token with **bypass 2FA** enabled, since a run cannot
+answer a one-time-password prompt. The version in `package.json`, the changelog section
+describing it and the tag are the same number;
+[tests/release.spec.ts](tests/release.spec.ts) is that checklist, executable.
 
 The project is on `0.y.z`, which under [Semantic Versioning](https://semver.org/) means the
 public API is not promised stable yet — fitting for a plugin built against a `0.2.1-alpha`
@@ -250,6 +254,7 @@ src/client/RemoveModelDialog.tsx the removal confirmation
 src/client/locales.ts        zh + en dictionaries
 cordis.patch.yml             the bundle layer: the row a profile composes
 tests/                       the specs: matching, write paths, bindings, and the page
+.github/workflows/publish.yml the tag push that publishes the version to npm
 CHANGELOG.md                 one section per release, written for a reader
 AGENTS.md                    the versioning, commit and changelog conventions
 LICENSE                      MIT

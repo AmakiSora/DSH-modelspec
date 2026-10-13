@@ -76,9 +76,15 @@ single feature is allowed to roll the version into it by accident, which is why
 4. Tag it: `git tag -a vX.Y.Z -m 'X.Y.Z'`. The tag is `vX.Y.Z`; the version is `X.Y.Z` —
    the `v` is part of the tag, not of the version.
 5. `pnpm run build && pnpm run stage`.
-6. Publish it: `pnpm publish` (or `npm publish`). `files` decides what the tarball carries and
-   `prepublishOnly` rebuilds before it is packed, so a published version cannot be a stale
-   `lib/`. A version publishes once — bump it rather than retrying the same number.
+6. Push it: `git push --follow-tags`. **The tag push is the publish step** —
+   `.github/workflows/publish.yml` runs `lint`/`typecheck`/`test` once more, checks that the
+   tag names the version in `package.json`, and publishes from the runner, which is not behind
+   the network the registry is unreachable from here. It needs the repository secret
+   `NPM_TOKEN`: a granular token with **bypass 2FA** enabled, because a run cannot answer a
+   one-time-password prompt. `files` decides what the tarball carries and `prepublishOnly`
+   rebuilds before it is packed, so a published version cannot be a stale `lib/`. A version
+   publishes once — bump it rather than retrying the same number; a release whose tag was
+   pushed before this workflow existed is published from its **Run workflow** button.
 
 `tests/release.spec.ts` fails when the version in `package.json` has no changelog heading,
 when the changelog's compare link has not moved with it, when the entry is undated or
