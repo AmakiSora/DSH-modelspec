@@ -1,6 +1,6 @@
 {
   "name": "dsh-modelspec",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "A dsh web-client plugin: compares the OpenRouter catalog with the models this deployment configured and writes the differences back",
   "license": "MIT",
   "type": "module",
