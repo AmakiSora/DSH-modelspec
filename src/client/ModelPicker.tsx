@@ -455,8 +455,8 @@ export function ModelFields({ fields, disabled, t, onChange, reasoningCapable }:
             : (
               <div className={css.effortGrid}>
                 {REASONING_LEVELS.map(level => (
-                  <label className={css.addField} key={level}>
-                    <span className={css.addFieldName}>{t(`effort_${level}` as ModelsDevLocaleKey)}</span>
+                  <label className={css.effortCell} key={level}>
+                    <span className={css.effortLevel}>{t(`effort_${level}` as ModelsDevLocaleKey)}</span>
                     <Input
                       value={fields.efforts[level]}
                       placeholder={level === 'off' ? t('effortOffPlaceholder') : t('addModelUnset')}

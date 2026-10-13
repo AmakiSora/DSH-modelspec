@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.4.3] - 2026-10-14
+
+### Fixed
+
+- The reasoning-effort block in the add-model and edit-model dialogs laid its level fields out
+  as label-beside-field rows inside a two-column grid, which pushed every field half out of the
+  dialog and left the level names floating between the columns. Each level is now a stacked
+  cell — the level name above its field — and the *off* placeholder is a short phrase, with the
+  longer explanation living in the note the block already carried.
+
 ## [0.4.2] - 2026-10-14
 
 ### Changed
@@ -135,7 +145,8 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - Specs over the matching, the write paths, the browser-local bindings, and the rendered
   page.
 
-[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.3
 [0.4.2]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.2
 [0.4.1]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.1
 [0.4.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.0

@@ -453,7 +453,9 @@
 }
 
 /* The reasoning-effort block: one fieldset, the non-reasoning switch, and the
-   level fields in the escalation order the adapter publishes. */
+   level fields in the escalation order the adapter publishes. The legend rides
+   outside the label grid, so it keeps the row labels' width without dragging
+   every cell's layout into the row shape. */
 .efforts {
   margin: 0;
   padding: 0;
@@ -463,8 +465,35 @@
   gap: 8px;
 }
 
+.efforts > legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Each level is a stacked cell — the level name above its field — because the
+   wire spellings are short but the off level's placeholder is a sentence: a
+   side-by-side row would either truncate the placeholder or size every cell
+   around the widest one. */
+.effortCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.effortCell > span:last-child {
+  min-width: 0;
+}
+
+.effortLevel {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .effortGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 8px 12px;
 }
