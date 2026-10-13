@@ -8,7 +8,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   Button, IconChevronDownOutlineRegular, IconEditOutlineRegular, IconPlusOutlineRegular, IconRefreshOutlineRegular,
-  IconTrashOutlineRegular, StateDot, Tag, type StateDotState,
+  IconSettingsOutlineRegular, IconTrashOutlineRegular, StateDot, Tag, type StateDotState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { FieldDifference } from './comparison.ts'
@@ -16,8 +16,10 @@ import type { ModelsDevModality, ReasoningEfforts } from './types.ts'
 import { FIELD_KEYS, STRATEGY_KEYS } from './locales.ts'
 import type { ModelRowView, ModelsDevFace, ModelsDevState, RouteView, WriteNotice } from './store.ts'
 import { AddModelDialog } from './AddModelDialog.tsx'
+import { CatalogSettingsDialog } from './CatalogSettingsDialog.tsx'
 import { EditModelDialog } from './EditModelDialog.tsx'
 import { RemoveModelDialog } from './RemoveModelDialog.tsx'
+import { DEFAULT_CATALOG_ENDPOINT } from './catalog-endpoint.ts'
 import css from './ModelsDevPage.module.css'
 
 /** Full component props assembled by the main slot renderer. */
@@ -258,7 +260,7 @@ function RouteCard({ route, state, onApplyRoute, onApplyModel, onAddModel, onEdi
  * @returns the panel element.
  */
 export function ModelsDevPage({
-  t, useModelsDev, ensure, refresh, applyModel, applyRoute, applyAll,
+  t, useModelsDev, ensure, refresh, openSettings, saveEndpoint, cancelSettings, applyModel, applyRoute, applyAll,
   pickModel, searchModel, discoverModels, addModel, saveModel, removeModel, cancelPick,
 }: ModelsDevPageProps): ReactNode {
   useEffect(() => { ensure() }, [ensure])
@@ -285,6 +287,10 @@ export function ModelsDevPage({
           <Button variant="outline" size="sm" icon={<IconRefreshOutlineRegular size={13} />}
             disabled={state.refreshing || busy} onClick={refresh} aria-label={t('refresh')}>
             {state.refreshing ? t('refreshing') : t('refresh')}
+          </Button>
+          <Button variant="outline" size="sm" icon={<IconSettingsOutlineRegular size={13} />}
+            onClick={openSettings} aria-label={t('settings')}>
+            {t('settings')}
           </Button>
           <Button variant="primary" size="sm" disabled={!differing || busy || !state.writable} onClick={applyAll}>
             {t('applyAll')}
@@ -368,6 +374,14 @@ export function ModelsDevPage({
           onClose={() => { setRemoving(null) }}
         />
       )}
+      <CatalogSettingsDialog
+        open={state.settingsOpen}
+        endpoint={state.catalogEndpoint}
+        defaultEndpoint={DEFAULT_CATALOG_ENDPOINT}
+        t={t}
+        onSave={saveEndpoint}
+        onClose={cancelSettings}
+      />
     </div>
   )
 }

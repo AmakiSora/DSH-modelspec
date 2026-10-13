@@ -13,6 +13,7 @@ import type {
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { addModelOps, newModelProblem, type NewModelEntry } from './add-model.ts'
 import { bindingHost, bindingKey, readBindings, writeBinding, type EntryBinding } from './bindings.ts'
+import { writeCatalogEndpoint } from './catalog-endpoint.ts'
 import { ModelsDevCatalog } from './catalog-service.ts'
 import type { ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevOption } from './types.ts'
 import { applyOps, compareModel, editOps, removeModelOps, type EditedModel, type FieldDifference } from './comparison.ts'
@@ -108,6 +109,10 @@ export interface ModelsDevState {
   readonly notice: WriteNotice | null
   /** The open picker, or `null` when none is. */
   readonly picker: ModelPickerState | null
+  /** The address the catalog is read from, which the settings dialog edits. */
+  readonly catalogEndpoint: string
+  /** Whether the catalog settings dialog is open. */
+  readonly settingsOpen: boolean
 }
 
 /** The data sources and callbacks the panel's slot registration injects. */
@@ -118,6 +123,12 @@ export interface ModelsDevFace {
   readonly ensure: () => void
   /** Read the catalog again, ignoring its held lifetime. */
   readonly refresh: () => void
+  /** Open the catalog settings dialog. */
+  readonly openSettings: () => void
+  /** Point the catalog at another address, keep it for this browser, and read again. */
+  readonly saveEndpoint: (endpoint: string) => void
+  /** Close the settings dialog without changing anything. */
+  readonly cancelSettings: () => void
   /** Adopt one model's published values. */
   readonly applyModel: (routeKey: string, modelKey: string) => void
   /** Adopt every differing model of one route. */
@@ -246,6 +257,8 @@ export class ModelsDevController {
       writing: [],
       notice: null,
       picker: null,
+      catalogEndpoint: catalog.source,
+      settingsOpen: false,
     })
   }
 
@@ -273,6 +286,27 @@ export class ModelsDevController {
   }
 
   /**
+   * Point the catalog at another address, remember it for this browser, and
+   * read again.
+   *
+   * The address is kept per host beside the panel, exactly as the entry
+   * bindings are: the fetch belongs to this browser, so a network that cannot
+   * reach the published endpoint is one only the reader can answer for. A
+   * changed address drops the held copy, and the dialog stays open over the
+   * failure when the new one cannot be read either.
+   *
+   * @param endpoint - the address to read the catalog from.
+   */
+  private async retarget(endpoint: string): Promise<void> {
+    const address = endpoint.trim()
+    if (address === '') return
+    writeCatalogEndpoint(bindingHost(), address)
+    this.catalog.retarget(address)
+    this.patch({ catalogEndpoint: address, settingsOpen: false, status: 'loading', error: null })
+    await this.load(true)
+  }
+
+  /**
    * Read the deployment's configuration again after it changed elsewhere. The
    * catalog is not read again, because only the configuration moved.
    */
@@ -291,6 +325,9 @@ export class ModelsDevController {
       hooks: { modelsDev: this.store },
       ensure: () => { if (this.getSnapshot().status === 'idle') void this.load(false) },
       refresh: () => { void this.load(true) },
+      openSettings: () => { this.patch({ settingsOpen: true }) },
+      saveEndpoint: (endpoint) => { void this.retarget(endpoint) },
+      cancelSettings: () => { this.patch({ settingsOpen: false }) },
       applyModel: (routeKey, modelKey) => { void this.apply(this.plan(routeKey, modelKey)) },
       applyRoute: (routeKey) => { void this.apply(this.plan(routeKey, null)) },
       applyAll: () => { void this.apply(this.plan(null, null)) },

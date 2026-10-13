@@ -25,6 +25,8 @@ const IDLE: ModelsDevState = {
   writing: [],
   notice: null,
   picker: null,
+  catalogEndpoint: 'https://openrouter.ai/api/v1/models',
+  settingsOpen: false,
 }
 
 /** One configured model row. */
@@ -105,6 +107,9 @@ function props(state: ModelsDevState): ModelsDevPageProps {
     useModelsDev: () => state,
     ensure: vi.fn(),
     refresh: vi.fn(),
+    openSettings: vi.fn(),
+    saveEndpoint: vi.fn(),
+    cancelSettings: vi.fn(),
     applyModel: vi.fn(),
     applyRoute: vi.fn(),
     applyAll: vi.fn(),
@@ -496,6 +501,30 @@ describe('adding a model', () => {
     fireEvent.click(screen.getByLabelText('Non-reasoning model'))
     expect(screen.queryByLabelText('low')).toBeNull()
     expect((screen.getByLabelText('Non-reasoning model') as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('opens the catalog settings dialog from the header button', () => {
+    const injected = props({ ...ready(), catalogEndpoint: 'https://mirror.example/api', settingsOpen: false })
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(injected.openSettings).toHaveBeenCalled()
+  })
+
+  it('shows the address in force and disables the save button until it changes', () => {
+    panel({ ...ready(), catalogEndpoint: 'https://mirror.example/api', settingsOpen: true })
+    const address = screen.getByLabelText('Catalog address') as HTMLInputElement
+    expect(address.value).toBe('https://mirror.example/api')
+    expect((screen.getByRole('button', { name: 'Save and read again' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(address, { target: { value: 'https://other.example/api' } })
+    expect((screen.getByRole('button', { name: 'Save and read again' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('saves the edited address through the panel action', () => {
+    const injected = props({ ...ready(), catalogEndpoint: 'https://mirror.example/api', settingsOpen: true })
+    render(<ModelsDevPage {...injected} />)
+    fireEvent.change(screen.getByLabelText('Catalog address'), { target: { value: 'https://other.example/api' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save and read again' }))
+    expect(injected.saveEndpoint).toHaveBeenCalledWith('https://other.example/api')
   })
 
   it('shows no chooser at all when only one entry matched', () => {

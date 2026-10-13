@@ -8,6 +8,16 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## [Unreleased]
 
+### Added
+
+- A **Settings** button in the panel header opens a dialog that sets the address the catalog is
+  read from. The read is the browser's own, so a network that cannot reach the default endpoint
+  — the timeout the panel reported before this existed — is one no deployment configuration can
+  fix. The stored address replaces the default outright, so both a mirror serving the same
+  document and a CORS proxy whose address carries the target work; clearing the field and
+  saving restores the default. The address is kept in this browser per host, beside the entry
+  bindings, and reaches the next read immediately.
+
 ## [0.4.0] - 2026-10-14
 
 ### Added

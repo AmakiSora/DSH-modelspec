@@ -18,6 +18,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: the ctx.remote Context merge, the settings and llm payload
 // vocabulary, and the `modelsDev` Remote this page's reads arrive through.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import { bindingHost } from './bindings.ts'
+import { readCatalogEndpoint } from './catalog-endpoint.ts'
 import { ModelsDevCatalog } from './catalog-service.ts'
 import { ModelsDevPage } from './ModelsDevPage.tsx'
 import { ModelsDevPanelIcon } from './ModelsDevPanelIcon.tsx'
@@ -51,7 +53,11 @@ export const inject = ['slots', 'locale', 'remote', 'remote.llm', 'remote.settin
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-modelspec: dictionaries')
   const t = ctx.locale.bind(NS)
-  const controller = new ModelsDevController(ctx, new ModelsDevCatalog())
+  // The address this browser stored for itself wins over the shipped default:
+  // the fetch is the browser's own, so a network that cannot reach the
+  // published endpoint is answered by the reader's stored override, not by the
+  // deployment's configuration.
+  const controller = new ModelsDevController(ctx, new ModelsDevCatalog(readCatalogEndpoint(bindingHost())))
   const face = controller.inject()
   ctx.effect(() => () => { controller.dispose() }, 'dsh-modelspec: controller')
   // The Host says when a settings namespace changed — from this page, the

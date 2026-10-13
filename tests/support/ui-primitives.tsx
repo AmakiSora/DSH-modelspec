@@ -95,6 +95,11 @@ export function IconTrashOutlineRegular({ size = 16, className, ...rest }: IconP
   return <svg width={size} height={size} className={className} {...rest} />
 }
 
+/** The gear glyph on the catalog settings button. */
+export function IconSettingsOutlineRegular({ size = 16, className, ...rest }: IconProps): ReactNode {
+  return <svg width={size} height={size} className={className} {...rest} />
+}
+
 /** Props the page passes to the shared text field. */
 export interface InputProps {
   readonly icon?: ReactNode

@@ -44,18 +44,43 @@ export class ModelsDevCatalog {
   private reading: Promise<CatalogIndex> | undefined
 
   /**
+   * The address the catalog is read from; mutable through {@link retarget},
+   * which a panel preference owns.
+   */
+  private currentEndpoint: string
+
+  /**
    * @param options - deployment choices; every field has a default.
    */
   constructor(
-    private readonly endpoint: string = CATALOG_ENDPOINT,
+    endpoint: string = CATALOG_ENDPOINT,
     private readonly cacheTtlMs: number = DEFAULT_CACHE_TTL_MS,
     private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
     private readonly providerAliases: ProviderAliases = {},
-  ) {}
+  ) {
+    this.currentEndpoint = endpoint
+  }
+
+  /**
+   * Point the service at another address and forget what it held.
+   *
+   * The address is a panel preference the reader changes while the page is
+   * open, so the change reaches the next read directly: the held copy came from
+   * the previous address, and serving it would show one source's answer under
+   * another's.
+   *
+   * @param endpoint - the address the following reads are pointed at.
+   */
+  retarget(endpoint: string): void {
+    if (endpoint === this.currentEndpoint) return
+    this.currentEndpoint = endpoint
+    this.held = undefined
+    this.reading = undefined
+  }
 
   /** The address this catalog reads from. */
   get source(): string {
-    return this.endpoint
+    return this.currentEndpoint
   }
 
   /**
@@ -153,16 +178,16 @@ export class ModelsDevCatalog {
    */
   private async fetchCatalog(): Promise<CatalogIndex> {
     try {
-      const response = await fetch(this.endpoint, {
+      const response = await fetch(this.currentEndpoint, {
         signal: AbortSignal.timeout(this.timeoutMs),
         headers: { accept: 'application/json' },
       })
       if (!response.ok) throw new Error(`the server answered HTTP ${response.status}`)
-      return indexCatalog(this.endpoint, Date.now(), await response.json() as unknown)
+      return indexCatalog(this.currentEndpoint, Date.now(), await response.json() as unknown)
     } catch (error: unknown) {
       throw new ModelsDevError(
         `could not read the catalog: ${error instanceof Error ? error.message : String(error)}`,
-        this.endpoint,
+        this.currentEndpoint,
         { cause: error },
       )
     }

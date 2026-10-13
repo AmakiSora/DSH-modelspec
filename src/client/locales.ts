@@ -124,6 +124,14 @@ export const zh = {
   addProblemEfforts: '推理强度必须至少声明一个 off 以外的档位。',
   diffEffortsNone: '（未声明）',
   diffEffortsOffFalse: '（非推理模型）',
+  settings: '设置',
+  settingsTitle: '目录读取设置',
+  settingsDescription: '目录由浏览器直接读取；无法访问默认地址时，可以把读取指向镜像或代理地址。',
+  settingsEndpoint: '目录地址',
+  settingsEndpointPlaceholder: '默认：{endpoint}',
+  settingsNote: '存储的地址会整体替换默认地址——镜像站点、或地址中携带目标参数的 CORS 代理都可以。清空并保存即恢复默认。',
+  settingsReset: '留空保存将恢复默认地址：{endpoint}',
+  settingsSave: '保存并重新读取',
 } satisfies Record<string, string>
 
 /** models.dev panel locale key union. */
@@ -272,4 +280,12 @@ export const en = {
   addProblemEfforts: 'Reasoning efforts must declare at least one level beyond off.',
   diffEffortsNone: '(not declared)',
   diffEffortsOffFalse: '(non-reasoning model)',
+  settings: 'Settings',
+  settingsTitle: 'Catalog reading settings',
+  settingsDescription: 'The browser reads the catalog itself; when the default address is unreachable, point the read at a mirror or a proxy.',
+  settingsEndpoint: 'Catalog address',
+  settingsEndpointPlaceholder: 'default: {endpoint}',
+  settingsNote: 'A stored address replaces the default outright — a mirror serving the same document, or a CORS proxy whose address carries the target. Clearing the field and saving restores the default.',
+  settingsReset: 'Saving an empty field restores the default address: {endpoint}',
+  settingsSave: 'Save and read again',
 } satisfies Record<ModelsDevLocaleKey, string>
