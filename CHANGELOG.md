@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.4.4] - 2026-10-15
+
+### Fixed
+
+- The reasoning-effort block stored an *off* field left empty as no level at all. An *off*
+  left empty means the level is supported while the request carries no parameter, and a
+  published declaration always carries it — so a model adopted from a catalog entry was
+  stored without that level, which the adapter reads as unsupported: the model offered its
+  reader no way to stop reasoning. The level is now written as `off: null` as soon as
+  another level is declared, and only a draft that leaves every level blank still declares
+  nothing.
+
 ## [0.4.3] - 2026-10-14
 
 ### Fixed
@@ -145,7 +157,8 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - Specs over the matching, the write paths, the browser-local bindings, and the rendered
   page.
 
-[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.4
 [0.4.3]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.3
 [0.4.2]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.2
 [0.4.1]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.1

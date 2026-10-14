@@ -378,16 +378,30 @@ export interface ModelFieldProps {
   readonly reasoningCapable: boolean
 }
 
-/** Read the flat effort fields back into the dict a model entry declares. */
+/**
+ * Read the flat effort fields back into the dict a model entry declares.
+ *
+ * A blank field declares no level, which the adapter pins unsupported. The `off`
+ * level is the one exception and is read after the loop, because its blank field
+ * is a value rather than an absence: the level is supported while dispatch sends
+ * no parameter.
+ */
 export function effortsFromFields(fields: PickerFields): ReasoningEfforts | undefined {
   if (fields.noReasoning) return false
   const dict: { [level in ReasoningLevel]?: string | null } = {}
   for (const level of REASONING_LEVELS) {
     const wire = fields.efforts[level]
-    if (wire === '') continue
-    dict[level] = level === 'off' && wire.trim() === '' ? null : wire
+    if (level !== 'off' && wire !== '') dict[level] = wire
   }
-  return Object.keys(dict).length === 0 ? undefined : dict
+  const off = fields.efforts.off
+  if (Object.keys(dict).length === 0) {
+    // Nothing beyond `off` is declared. A spelling the reader typed is still
+    // handed over, so the draft rule refuses it with its reason; a blank one
+    // declares nothing at all, which leaves the field to the adapter.
+    return off.trim() === '' ? undefined : { off }
+  }
+  dict.off = off.trim() === '' ? null : off
+  return dict
 }
 
 /**

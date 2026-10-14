@@ -494,6 +494,19 @@ describe('adding a model', () => {
     expect(field('max').value).toBe('')
   })
 
+  it('stores the off level a matched entry published rather than pinning it unsupported', () => {
+    const injected = props(adding({
+      modelId: 'acme-2',
+      candidates: [candidate('acme', 'acme-2', { declaredEfforts: { off: null, low: 'low', high: 'high' } })],
+    }))
+    render(<ModelsDevPage {...injected} />)
+    type('Model id', 'acme-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(injected.addModel).toHaveBeenCalledWith(expect.objectContaining({
+      reasoningEfforts: { off: null, low: 'low', high: 'high' },
+    }))
+  })
+
   it('offers no reasoning-effort block on a route whose family declares no such field', () => {
     const incapable = readyRoute()
     panel({
