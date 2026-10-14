@@ -146,7 +146,11 @@ function ModelCard({ row, busy, preset, writable, onApply, onEdit, onRemove, t }
         </div>
       </div>
       {match.strategy === 'none'
-        ? <p className={css.unmatched}>{t('unmatched')}</p>
+        ? (
+          <p className={css.unmatched}>
+            {match.routeProviderKey === undefined ? t('unmatchedNoProvider') : t('unmatched')}
+          </p>
+        )
         : (
           <>
             <p className={css.meta}>{matchMetaText(row, t)}</p>

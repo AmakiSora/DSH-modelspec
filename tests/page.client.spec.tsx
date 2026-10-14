@@ -233,6 +233,21 @@ describe('model specs page', () => {
     expect(screen.getByText('The catalog has no provider matching this route')).toBeTruthy()
   })
 
+  it('names the way out when neither the id nor the route reaches the catalog', () => {
+    panel(withRoute({
+      ...readyRoute(),
+      models: [{
+        key: 'llm-pi-ai/acme/0',
+        model: { index: 0, id: 'SenseNova/deepseek-v4-flash', inputModalities: [], modalityField: 'input' },
+        match: { provider: 'acme', modelId: 'SenseNova/deepseek-v4-flash', strategy: 'none' },
+        differences: [],
+      }],
+    }))
+    // A route directory has no provider of its own, so its rows cannot be matched
+    // by id either: the row says so and names the one control that can pin one.
+    expect(screen.getByText(/no entry for this id and no provider for this route/)).toBeTruthy()
+  })
+
   it('reports a configured route whose own configuration the directory flags', () => {
     const route = readyRoute()
     panel(withRoute({

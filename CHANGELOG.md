@@ -8,7 +8,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## [0.4.5] - 2026-10-15
 
-### Added
+### Fixed
 
 - **A model added from a catalog entry follows that entry.** The add-model dialog used to keep
   the values an entry filled in and forget which entry they came from, so the new row was
@@ -17,6 +17,9 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
   matching entry, right after being filled from one. The dialog now files the same
   browser-local entry source the editor writes, so the row is compared against the entry its
   values came from; an id no entry answered for still follows its id.
+- A row that reaches the catalog by neither its id nor its route's provider says so in one line
+  and names the control that fixes it, instead of reporting only that the catalog has no
+  matching entry. The route card still carries the route-level half of the same answer.
 
 ## [0.4.4] - 2026-10-15
 
