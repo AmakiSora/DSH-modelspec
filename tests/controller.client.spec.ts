@@ -649,7 +649,7 @@ describe('panel controller adds a model', () => {
     face.ensure()
     await settle()
     face.pickModel('llm-pi-ai/acme', null)
-    face.addModel(DRAFT)
+    face.addModel(DRAFT, undefined)
     await settle()
     expect(writes).toEqual([{
       op: 'set',
@@ -661,6 +661,32 @@ describe('panel controller adds a model', () => {
     expect(panel.getSnapshot().writing).toEqual([])
   })
 
+  it('files the entry the new model was filled from as what it follows', async () => {
+    const { panel } = addBench()
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', null)
+    face.addModel(DRAFT, { providerId: 'deepseek', modelId: 'deepseek/deepseek-v4-flash-0731' })
+    await settle()
+    // The id the catalog cannot reach is exactly the one a binding is for: the
+    // row is compared against the entry its values came from rather than
+    // reporting that the catalog has nothing for it.
+    expect(readBindings(bindingHost()).get(bindingKey('llm-pi-ai/acme', 'acme-2')))
+      .toEqual({ providerId: 'deepseek', modelId: 'deepseek/deepseek-v4-flash-0731' })
+  })
+
+  it('files no entry for a model the catalog answered nothing for', async () => {
+    const { panel } = addBench()
+    const face = panel.inject()
+    face.ensure()
+    await settle()
+    face.pickModel('llm-pi-ai/acme', null)
+    face.addModel(DRAFT, undefined)
+    await settle()
+    expect(readBindings(bindingHost()).has(bindingKey('llm-pi-ai/acme', 'acme-2'))).toBe(false)
+  })
+
   it('closes the dialog even though its own write makes the Host invalidate the panel', async () => {
     const seat = addBench()
     seat.panel.inject().ensure()
@@ -669,7 +695,7 @@ describe('panel controller adds a model', () => {
     // which starts a re-read underneath the settlement that has to close it.
     seat.script.broadcast = () => { seat.panel.invalidate() }
     seat.panel.inject().pickModel('llm-pi-ai/acme', null)
-    seat.panel.inject().addModel(DRAFT)
+    seat.panel.inject().addModel(DRAFT, undefined)
     await settle()
     expect(seat.panel.getSnapshot().picker).toBeNull()
     expect(seat.panel.getSnapshot().writing).toEqual([])
@@ -684,7 +710,7 @@ describe('panel controller adds a model', () => {
       error: new RemoteError('settings/rejected', 'model ids must be unique', { ns: 'llm-pi-ai' }),
     })
     seat.panel.inject().pickModel('llm-pi-ai/acme', null)
-    seat.panel.inject().addModel(DRAFT)
+    seat.panel.inject().addModel(DRAFT, undefined)
     await settle()
     expect(seat.panel.getSnapshot().picker).not.toBeNull()
     expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'model ids must be unique' })
@@ -699,7 +725,7 @@ describe('panel controller adds a model', () => {
       error: new RemoteError('settings/conflict', 'the namespace moved', { ns: 'llm-pi-ai', expected: 7, actual: 8 }),
     })
     seat.panel.inject().pickModel('llm-pi-ai/acme', null)
-    seat.panel.inject().addModel(DRAFT)
+    seat.panel.inject().addModel(DRAFT, undefined)
     await settle()
     expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'conflict' })
     expect(seat.panel.getSnapshot().picker).not.toBeNull()
@@ -717,7 +743,7 @@ describe('panel controller adds a model', () => {
       { ...DRAFT, contextWindow: 0 },
       { ...DRAFT, maxTokens: -8 },
     ]) {
-      face.addModel(draft)
+      face.addModel(draft, undefined)
       await settle()
     }
     expect(seat.writes).toEqual([])
@@ -734,8 +760,8 @@ describe('panel controller adds a model', () => {
     })
     preset.panel.inject().ensure()
     await settle()
-    preset.panel.inject().addModel(DRAFT)
-    preset.panel.inject().addModel(DRAFT)
+    preset.panel.inject().addModel(DRAFT, undefined)
+    preset.panel.inject().addModel(DRAFT, undefined)
     await settle()
     expect(preset.writes).toEqual([])
   })
@@ -746,7 +772,7 @@ describe('panel controller adds a model', () => {
     face.ensure()
     await settle()
     face.pickModel('llm-pi-ai/acme', null)
-    face.addModel(DRAFT)
+    face.addModel(DRAFT, undefined)
     seat.panel.dispose()
     const frozen = seat.panel.getSnapshot()
     await settle()
@@ -1058,7 +1084,7 @@ describe('panel controller edits a model', () => {
     await settle()
     face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
     // Appending while an edit is open is not what the reader asked for.
-    face.addModel(DRAFT)
+    face.addModel(DRAFT, undefined)
     await settle()
     expect(seat.writes).toEqual([])
     face.saveModel({ name: 'Acme One', contextWindow: 131072, maxTokens: 4096, inputModalities: ['text'] }, undefined)

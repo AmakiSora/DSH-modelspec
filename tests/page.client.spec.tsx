@@ -504,7 +504,7 @@ describe('adding a model', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(injected.addModel).toHaveBeenCalledWith(expect.objectContaining({
       reasoningEfforts: { off: null, low: 'low', high: 'high' },
-    }))
+    }), { providerId: 'acme', modelId: 'acme-2' })
   })
 
   it('offers no reasoning-effort block on a route whose family declares no such field', () => {
@@ -640,7 +640,7 @@ describe('adding a model', () => {
       maxTokens: 4096,
       inputModalities: ['text', 'image'],
       modalityField: 'input',
-    })
+    }, undefined)
   })
 
   it('leaves a capacity the reader cleared out of the entry', () => {
@@ -649,7 +649,37 @@ describe('adding a model', () => {
     type('Model id', 'acme-2')
     type('Context length', '')
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect(injected.addModel).toHaveBeenCalledWith(expect.not.objectContaining({ contextWindow: 200000 }))
+    expect(injected.addModel).toHaveBeenCalledWith(expect.not.objectContaining({ contextWindow: 200000 }), { providerId: 'acme', modelId: 'acme-2' })
+  })
+
+  it('follows the entry the values were filled from, so the row has something to be compared against', () => {
+    const injected = props(adding({
+      modelId: 'acme-2',
+      candidates: [
+        candidate('openai', 'acme-2', { contextWindow: 200000 }),
+        candidate('azure', 'acme-2', { contextWindow: 64000 }),
+      ],
+    }))
+    render(<ModelsDevPage {...injected} />)
+    type('Model id', 'acme-2')
+    fireEvent.click(screen.getAllByRole('radio')[1] as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(injected.addModel).toHaveBeenCalledWith(expect.anything(), { providerId: 'azure', modelId: 'acme-2' })
+  })
+
+  it('follows the one entry a fuzzy search answered with', () => {
+    const injected = props(adding({
+      fuzzy: true,
+      modelId: 'SenseNova/deepseek-v4-flash',
+      candidates: [similar('deepseek', 'deepseek/deepseek-v4-flash-0731', { similarity: 'contains' })],
+    }))
+    render(<ModelsDevPage {...injected} />)
+    type('Model id', 'SenseNova/deepseek-v4-flash')
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(injected.addModel).toHaveBeenCalledWith(expect.anything(), {
+      providerId: 'deepseek',
+      modelId: 'deepseek/deepseek-v4-flash-0731',
+    })
   })
 
   it('refuses an id the route already configures, and says which one', () => {
@@ -954,7 +984,7 @@ describe('adding a model by fuzzy search', () => {
       maxTokens: 8192,
       inputModalities: ['text', 'image'],
       modalityField: 'input',
-    })
+    }, { providerId: 'acme', modelId: 'acme-2' })
   })
 
   it('says so when no entry came close, rather than claiming the catalog has none', () => {

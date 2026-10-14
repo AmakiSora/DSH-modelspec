@@ -21,9 +21,10 @@ import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { newModelProblem, newModelTemplate, type NewModelEntry, type NewModelProblem } from './add-model.ts'
 import { type ModelsDevLocaleKey } from './locales.ts'
 import {
-  CandidatePicker, ModelFields, effortFields, effortsFromFields, fieldsFrom, optionKey, upstreamFields,
+  CandidatePicker, ModelFields, bindingOf, effortFields, effortsFromFields, fieldsFrom, optionKey, upstreamFields,
   type PickerFields, type PickerTranslate, type UpstreamProbe,
 } from './ModelPicker.tsx'
+import type { EntryBinding } from './bindings.ts'
 import type { ModelPickerState, RouteView } from './store.ts'
 import css from './ModelsDevPage.module.css'
 
@@ -43,8 +44,8 @@ export interface AddModelDialogProps {
   readonly onSearch: (modelId: string, fuzzy: boolean) => void
   /** Ask the route's own endpoint which models it serves. */
   readonly onDiscover: () => void
-  /** Append the entry to the route. */
-  readonly onSubmit: (entry: NewModelEntry) => void
+  /** Append the entry to the route, following the catalog entry it was filled from. */
+  readonly onSubmit: (entry: NewModelEntry, binding: EntryBinding | undefined) => void
   /** Close without writing. */
   readonly onClose: () => void
 }
@@ -144,7 +145,11 @@ export function AddModelDialog({
 
   const submit = (): void => {
     if (disabled || problem !== undefined) return
-    onSubmit(draft)
+    // The entry the fields were filled from is what the new model follows, the
+    // same preference the editor files: an added gateway id has no comparison
+    // otherwise, and the values just taken from that entry would be compared
+    // against nothing. An id the catalog answered nothing for follows its id.
+    onSubmit(draft, active === undefined ? undefined : bindingOf(active))
   }
 
   return (

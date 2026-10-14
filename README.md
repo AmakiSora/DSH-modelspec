@@ -67,7 +67,9 @@ own resolution enforces.
   and asks the catalog about it, so the comparison below stays in play. A field the endpoint
   stayed silent about is left to the adapter, and a name that only repeats the id is not stored.
 - **One entry matched.** The published values fill the fields and the dialog names the
-  comparison that found it.
+  comparison that found it. The new model then follows that entry — the browser-local entry
+  source the editor writes — so its row is compared against it from the moment it exists; an
+  id no entry answered for follows its id instead.
 - **Several entries matched.** Every one is offered, with the provider it came from and the
   capacities it publishes, and nothing is chosen until you pick. The same precedence a
   comparison uses decides which entries are offered at all: the resolved provider first, then

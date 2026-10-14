@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.4.5] - 2026-10-15
+
+### Added
+
+- **A model added from a catalog entry follows that entry.** The add-model dialog used to keep
+  the values an entry filled in and forget which entry they came from, so the new row was
+  matched by its id again the moment it existed — and a gateway id the catalog cannot reach by
+  itself (`SenseNova/deepseek-v4-flash` beside `CAIH/glm-5.3`) reported that the catalog had no
+  matching entry, right after being filled from one. The dialog now files the same
+  browser-local entry source the editor writes, so the row is compared against the entry its
+  values came from; an id no entry answered for still follows its id.
+
 ## [0.4.4] - 2026-10-15
 
 ### Fixed
@@ -157,7 +169,8 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - Specs over the matching, the write paths, the browser-local bindings, and the rendered
   page.
 
-[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.5
 [0.4.4]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.4
 [0.4.3]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.3
 [0.4.2]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.2

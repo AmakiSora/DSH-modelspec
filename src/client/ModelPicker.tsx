@@ -13,6 +13,7 @@ import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
+import type { EntryBinding } from './bindings.ts'
 import { STRATEGY_KEYS, type ModelsDevLocaleKey } from './locales.ts'
 import type { ModelsDevOption, ModelsDevSimilarity, ReasoningEfforts, ReasoningLevel } from './types.ts'
 import { REASONING_LEVELS } from './types.ts'
@@ -32,6 +33,18 @@ const SIMILARITY_KEYS = {
 /** One option's identity in the chooser: the provider it came from and its id. */
 export function optionKey(option: ModelsDevOption): string {
   return `${option.providerId}/${option.model.id}`
+}
+
+/**
+ * The catalog entry one option names, in the shape a binding takes.
+ *
+ * Both dialogs file this when a reader chooses an entry, so a single definition
+ * is what keeps "which entry does this model follow" meaning one thing.
+ * @param option - the chosen entry.
+ * @returns the binding that names it.
+ */
+export function bindingOf(option: ModelsDevOption): EntryBinding {
+  return { providerId: option.providerId, modelId: option.model.id }
 }
 
 /** One capacity rendered the way the chooser shows it; an unpublished one is a dash. */

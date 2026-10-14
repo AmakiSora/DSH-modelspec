@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import { CandidatePicker, ModelFields, effortFields, effortsFromFields, fieldsFrom, optionKey, type PickerFields, type PickerTranslate } from './ModelPicker.tsx'
+import { CandidatePicker, ModelFields, bindingOf, effortFields, effortsFromFields, fieldsFrom, optionKey, type PickerFields, type PickerTranslate } from './ModelPicker.tsx'
 import type { EntryBinding } from './bindings.ts'
 import type { EditedModel } from './comparison.ts'
 import type { ModelsDevOption } from './types.ts'
@@ -47,11 +47,6 @@ function boundEntry(row: ModelRowView): EntryBinding | undefined {
   return row.match.strategy === 'bound' && row.match.model !== undefined
     ? { providerId: row.match.model.providerId, modelId: row.match.model.id }
     : undefined
-}
-
-/** The catalog entry one option names, in the shape a binding takes. */
-function bindingOf(option: ModelsDevOption): EntryBinding {
-  return { providerId: option.providerId, modelId: option.model.id }
 }
 
 /**

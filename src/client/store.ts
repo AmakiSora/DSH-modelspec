@@ -143,8 +143,8 @@ export interface ModelsDevFace {
   readonly searchModel: (modelId: string, fuzzy: boolean) => void
   /** Ask the picker's route which models its own endpoint serves. */
   readonly discoverModels: () => void
-  /** Append a new model entry to the route the open picker belongs to. */
-  readonly addModel: (entry: NewModelEntry) => void
+  /** Append a new model entry to the route the open picker belongs to, following the entry it was filled from. */
+  readonly addModel: (entry: NewModelEntry, binding: EntryBinding | undefined) => void
   /** Write one edited model back, against the entry source it should follow. */
   readonly saveModel: (edited: EditedModel, binding: EntryBinding | undefined) => void
   /** Remove one model from a route's namespace. */
@@ -352,7 +352,7 @@ export class ModelsDevController {
       pickModel: (routeKey, modelKey) => { this.open(routeKey, modelKey) },
       searchModel: (modelId, fuzzy) => { void this.search(modelId, fuzzy) },
       discoverModels: () => { void this.discover() },
-      addModel: (entry) => { void this.append(entry) },
+      addModel: (entry, binding) => { void this.append(entry, binding) },
       saveModel: (edited, binding) => { void this.save(edited, binding) },
       removeModel: (routeKey, modelKey) => { void this.remove(routeKey, modelKey) },
       cancelPick: () => { this.patch({ picker: null }) },
@@ -485,9 +485,16 @@ export class ModelsDevController {
    * dialog checks the same rules before enabling its confirm button, and a
    * second caller must not reach the namespace with them either.
    *
+   * The entry the values were taken from is filed as what the new model follows,
+   * exactly as an edit files one, and for the same reason: the binding decides
+   * what the row is compared against. A gateway id the catalog cannot reach by
+   * itself is compared against that entry from the moment it exists, instead of
+   * reporting that the catalog has nothing for it.
+   *
    * @param entry - the values to write.
+   * @param binding - the catalog entry the values came from, or `undefined` when the catalog answered nothing.
    */
-  private async append(entry: NewModelEntry): Promise<void> {
+  private async append(entry: NewModelEntry, binding: EntryBinding | undefined): Promise<void> {
     const state = this.getSnapshot()
     const picker = state.picker
     if (picker === null || picker.modelKey !== null) return
@@ -498,6 +505,11 @@ export class ModelsDevController {
       return
     }
     if (newModelProblem(route.route, entry) !== undefined) return
+    // Filed before the write, like an edit's, so the reload the write settles
+    // with is the read that shows the new row following that entry. A refused
+    // write leaves the choice filed for the id it names, which nothing reads
+    // until a model carrying that id is configured.
+    writeBinding(this.host, bindingKey(route.key, entry.id.trim()), binding)
     await this.write(
       route.route,
       addModelOps(route.route, entry),
