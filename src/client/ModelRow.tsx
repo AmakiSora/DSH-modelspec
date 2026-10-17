@@ -109,11 +109,14 @@ export function ModelRow(props: ModelRowProps): ReactNode {
           onChange={(event) => { onDraft({ ...draft, name: event.target.value }) }}
         />
         {/* Only what the catalog contradicts earns a mark here; the fields
-            behind the disclosure spell out which ones. */}
-        {row.differences.length === 0
-          ? null
-          : <Tag tone="warning">{t('routeDiffering', { count: String(row.differences.length) })}</Tag>}
-        {pinned ? <Tag tone="info">{t('pinnedTag')}</Tag> : null}
+            behind the disclosure spell out which ones. The seat is reserved on
+            every row, so a row with no mark is not a narrower row. */}
+        <span className={css['modelTags']}>
+          {row.differences.length === 0
+            ? null
+            : <Tag tone="warning">{t('routeDiffering', { count: String(row.differences.length) })}</Tag>}
+          {pinned ? <Tag tone="info">{t('pinnedTag')}</Tag> : null}
+        </span>
         <button
           type="button"
           className={css['iconButton']}

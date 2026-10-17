@@ -225,11 +225,24 @@
   padding: 6px;
 }
 
+/* Every row is its own grid, so its columns have to be stated in widths the
+   content cannot move: the two inputs take what the fixed seats leave, and the
+   tags keep one reserved seat whether or not a row has any. Sizing the tag
+   column to its content would make each row distribute the leftover space
+   differently, and the name field would start at a different x on every line. */
 .modelRow {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 128px 28px 28px;
   align-items: center;
   gap: 6px;
+}
+
+.modelTags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  justify-self: start;
 }
 
 /* Square, label-free affordances: the row's own inputs carry the meaning, so
