@@ -141,10 +141,18 @@ describe('release metadata', () => {
     }
   })
 
-  it('says it is on 0.y.z while it has not promised a stable API', () => {
-    // 1.0.0 is a decision to support the panel's behaviour, not a number the
-    // next feature is allowed to roll over into by accident.
-    expect(manifest.version.startsWith('0.')).toBe(true)
+  it('promises a stable API at 1.0.0 or later', () => {
+    // 1.0.0 was a decision to support the panel's behaviour, made once and on
+    // purpose: from here a breaking change is a major bump rather than a minor
+    // one, so this asserts the promise was actually taken rather than that the
+    // next feature may roll into it.
+    expect(Number(manifest.version.split('.')[0])).toBeGreaterThanOrEqual(1)
+  })
+
+  it('describes the breaking release in the changelog it claims', () => {
+    // The release that took the promise is the one a reader upgrading has to be
+    // told about, so the entry has to say so where the categories live.
+    expect(changelog).toMatch(/### Changed[\s\S]*breaking|### Removed/)
   })
 
   it('ships the text of the license the manifest declares', () => {

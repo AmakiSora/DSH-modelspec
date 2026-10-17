@@ -22,6 +22,7 @@ export interface ButtonProps {
   readonly size?: 'sm' | 'md'
   readonly icon?: ReactNode
   readonly disabled?: boolean
+  readonly title?: string
   readonly onClick?: () => void
   readonly children?: ReactNode
   readonly 'aria-label'?: string
@@ -72,6 +73,11 @@ export interface IconProps {
 
 /** The disclosure chevron. */
 export function IconChevronDownOutlineRegular({ size = 16, className, ...rest }: IconProps): ReactNode {
+  return <svg width={size} height={size} className={className} {...rest} />
+}
+
+/** The collapsed disclosure chevron. */
+export function IconChevronRightOutlineRegular({ size = 16, className, ...rest }: IconProps): ReactNode {
   return <svg width={size} height={size} className={className} {...rest} />
 }
 
@@ -152,6 +158,31 @@ export function Checkbox({ checked = false, onChange, label, disabled, title, cl
     <label className={className} title={title}>
       <input
         type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={event => { onChange?.(event.target.checked) }}
+      />
+      {label}
+    </label>
+  )
+}
+
+/** Props the page passes to the shared two-state toggle. */
+export interface SwitchProps {
+  readonly checked?: boolean
+  readonly label: string
+  readonly disabled?: boolean
+  readonly onChange?: (next: boolean) => void
+}
+
+/** A native checkbox carrying the toggle's accessible name. */
+export function Switch({ checked = false, label, disabled, onChange }: SwitchProps): ReactNode {
+  return (
+    <label>
+      <input
+        type="checkbox"
+        role="switch"
+        aria-label={label}
         checked={checked}
         disabled={disabled}
         onChange={event => { onChange?.(event.target.checked) }}

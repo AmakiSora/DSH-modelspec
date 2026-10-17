@@ -12,10 +12,11 @@
  * reader can see, not a permission.
  */
 
-import { type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PickerTranslate } from './ModelPicker.tsx'
+import type { Translate } from './ModelFields.tsx'
 import type { RouteView } from './store.ts'
+import css from './ModelsDevPanel.module.css'
 
 /** Everything the confirmation needs from the page around it. */
 export interface RemoveModelDialogProps {
@@ -28,7 +29,7 @@ export interface RemoveModelDialogProps {
   /** That route's namespace has a write in flight. */
   readonly busy: boolean
   /** The panel's dictionary seat. */
-  readonly t: PickerTranslate
+  readonly t: Translate
   /** Remove it. */
   readonly onConfirm: () => void
   /** Close without removing. */
@@ -37,7 +38,6 @@ export interface RemoveModelDialogProps {
 
 /**
  * Render the remove-model confirmation.
- *
  * @param props - the route, the model, and the two answers.
  * @returns the dialog element.
  */
@@ -48,19 +48,22 @@ export function RemoveModelDialog({
     <Modal
       open
       onClose={onClose}
-      title={t('removeModelTitle')}
-      closeLabel={t('addModelClose')}
-      description={t('removeModelDescription', { model: modelId, provider: route.route.displayName })}
+      title={t('removeTitle')}
+      closeLabel={t('close')}
+      description={t('removeDescription', { model: modelId, provider: route.route.displayName })}
+      className={css['dialog'] as string}
       footer={(
         <>
-          <Button variant="outline" disabled={busy} onClick={onClose}>{t('addModelCancel')}</Button>
-          <Button variant="primary" disabled={busy} onClick={onConfirm}>{t('removeModelConfirm')}</Button>
+          <Button variant="outline" disabled={busy} onClick={onClose}>{t('cancel')}</Button>
+          <Button variant="primary" disabled={busy} onClick={onConfirm}>
+            {busy ? t('removing') : t('removeConfirm')}
+          </Button>
         </>
       )}
     >
-      <ul>
-        <li>{t('removeModelKeeps', { model: modelId })}</li>
-        <li>{last ? t('removeModelLastRoute') : t('removeModelShiftsRoute')}</li>
+      <ul className={css['confirmList']}>
+        <li>{t('removeKeeps', { model: modelId })}</li>
+        <li>{last ? t('removeLast') : t('removeShifts')}</li>
       </ul>
     </Modal>
   )

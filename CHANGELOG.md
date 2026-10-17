@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [Unreleased]
+
+## [1.0.0] - 2026-10-17
+
+The panel is rebuilt on the layout of the harness's own **Settings → Models**
+page, moved into the left sidebar. This release is the deliberate `1.0.0` the
+project has been holding back: the panel's shape, its write model, and the copy
+it renders all changed, and the behaviour is now what the project promises.
+
+### Added
+
+- **The card editor.** Every provider card carries the model list as editable
+  rows: the model id and display name on the row, and the specification fields —
+  context window, max output, accepted input types, reasoning strengths — behind
+  a disclosure, exactly as the harness's own Models settings lays them out. Edits
+  are staged in the card; **Apply** writes them in one settings write, **Cancel**
+  discards them, and a card with unsaved edits says so.
+- **The catalog beside every field.** Each field shows what the catalog publishes
+  for it and, when the value differs, an **Adopt** action that stages the
+  published value without writing anything. A model and a whole card can be
+  filled the same way before anything is committed.
+- **Catalog entry** on a model row: the dialog that decides which published entry
+  the model is compared against, with the option to fill the card from it. The
+  choice is still a browser-local preference, never deployment configuration.
+- **Adopt all differences** on the panel: one settings write per namespace for
+  every value the catalog contradicts, disabled while any card holds staged
+  edits.
+
+### Changed
+
+- The panel renders the harness's Models-settings card material: the same
+  provider card, the same inset editing surface, the same 28/36px controls and
+  radius scale, and the same field layout inside a model row.
+- The bulk actions of the previous panel are gone. Adopting a single model or a
+  single route now stages the published values in the card and is written by the
+  card's **Apply**, so what will be stored is visible before it is.
+- A model whose id an edit renamed keeps the catalog entry it was pinned to: the
+  browser-local binding is refiled under the new id instead of being orphaned.
+- Built against `@deepseek-ai/dsh-*` `0.2.1-rc.2` and `@deepseek-ai/cordis`
+  `4.0.5`. **Dsh `0.2.1-rc.2` or later is required.**
+
+### Fixed
+
+- A stored reasoning declaration that omits a level the catalog publishes — most
+  often `off`, the level that sends no parameter — is now reported as a
+  difference, so adopting the published declaration repairs it instead of
+  leaving the level pinned unsupported behind a report of "up to date".
+- A staged value an adapter would refuse no longer blocks the card's other
+  edits: only the rows that actually changed are checked before a write.
+
+### Removed
+
+- The per-model and per-route **Apply** buttons, the per-model **Edit** dialog,
+  and the panel's own row/card layout. They are replaced by the card editor
+  above; the add, remove, catalog-settings and catalog-entry dialogs remain.
+
 ## [0.4.5] - 2026-10-15
 
 ### Fixed
@@ -172,7 +228,8 @@ First release. Built against dsh `0.2.1-alpha.2`.
 - Specs over the matching, the write paths, the browser-local bindings, and the rendered
   page.
 
-[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/AmakiSora/DSH-modelspec/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v1.0.0
 [0.4.5]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.5
 [0.4.4]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.4
 [0.4.3]: https://github.com/AmakiSora/DSH-modelspec/releases/tag/v0.4.3

@@ -1,9 +1,10 @@
 /**
  * Panel state for the models.dev page: the configured routes joined with what
- * the catalog says about them, the writes that adopt the catalog values, and
- * the picker that adds or edits one model. The Host Remote reads, the settings
- * writes, and the browser-local entry bindings are bound here, so a component
- * receives plain data and callbacks only.
+ * the catalog says about them, the writes that commit the editor or adopt the
+ * published values, and the two dialogs that add a model or repoint one at a
+ * catalog entry. The Host Remote reads, the settings writes, and the
+ * browser-local entry bindings are bound here, so a component receives plain
+ * data and callbacks only.
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -16,12 +17,13 @@ import { bindingHost, bindingKey, readBindings, writeBinding, type EntryBinding 
 import { writeCatalogEndpoint } from './catalog-endpoint.ts'
 import { ModelsDevCatalog } from './catalog-service.ts'
 import type { ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevOption } from './types.ts'
-import { applyOps, compareModel, editOps, removeModelOps, type EditedModel, type FieldDifference } from './comparison.ts'
+import { applyOps, compareModel, removeModelOps, type FieldDifference } from './comparison.ts'
 import { readRoutes, type ConfiguredModel, type ConfiguredRoute } from './configured.ts'
+import { draftDiffers, draftOps, draftProblem, type DraftProblem, type ModelDraft } from './draft.ts'
 
 export type { NewModelEntry, NewModelProblem, NewModelTemplate } from './add-model.ts'
-export type { EditedModel } from './comparison.ts'
 export type { EntryBinding } from './bindings.ts'
+export type { ModelDraft, DraftProblem } from './draft.ts'
 
 /** One configured model with the catalog's answer and the differences it implies. */
 export interface ModelRowView {
@@ -47,14 +49,18 @@ export interface RouteView {
 
 /** What the last settings write did. */
 export type WriteNotice =
-  /** Every selected value reached the namespace. */
+  /** The open card's edits reached the namespace. */
   | { readonly kind: 'applied' }
+  /** Every differing value of every writable route reached its namespace. */
+  | { readonly kind: 'adopted' }
   /** One new model reached the namespace. */
   | { readonly kind: 'added'; readonly id: string }
-  /** One edited model reached the namespace. */
-  | { readonly kind: 'saved' }
   /** One model was removed from the namespace. */
   | { readonly kind: 'removed'; readonly id: string }
+  /** One model was repointed at another catalog entry. */
+  | { readonly kind: 'bound' }
+  /** A draft broke a rule the route's adapter enforces, so nothing was written. */
+  | { readonly kind: 'invalid'; readonly problem: DraftProblem }
   /** Another writer changed the namespace since the panel read it. */
   | { readonly kind: 'conflict' }
   /** The namespace refused the edit and said why. */
@@ -62,13 +68,21 @@ export type WriteNotice =
   /** The profile does not accept settings writes. */
   | { readonly kind: 'readonly' }
 
-/** What the model picker is waiting on. */
-export interface ModelPickerState {
-  /** Route the model belongs to, or is being added to. */
+/**
+ * The dialog that is open, if any.
+ *
+ * Both dialogs ask the same questions — which catalog entry answers to this
+ * model id, and which models the route's own endpoint serves — so they share
+ * one state and one set of searches; `mode` decides which one is committed.
+ */
+export interface EditorState {
+  /** Whether the dialog adds a model to the route or repoints one inside it. */
+  readonly mode: 'add' | 'entry'
+  /** Route the dialog belongs to. */
   readonly routeKey: string
-  /** The model being edited, or `null` when a model is being added. */
+  /** The model being repointed, or `null` when a model is being added. */
   readonly modelKey: string | null
-  /** Model id the picker last asked about. */
+  /** Model id the dialog last asked about. */
   readonly modelId: string
   /** Whether the last search was the fuzzy one rather than the comparisons. */
   readonly fuzzy: boolean
@@ -87,6 +101,14 @@ export interface ModelPickerState {
   readonly discovered: readonly LlmDiscoveredModel[] | null
   /** Why the last interrogation failed, or `null`. */
   readonly discoverError: string | null
+}
+
+/** One route's staged edits, as the editor commits them. */
+export interface RouteEdit {
+  /** The model the draft was opened from. */
+  readonly modelKey: string
+  /** The staged values. */
+  readonly draft: ModelDraft
 }
 
 /** Everything the page renders. */
@@ -109,8 +131,8 @@ export interface ModelsDevState {
   readonly writing: readonly string[]
   /** Outcome of the last write, or `null`. */
   readonly notice: WriteNotice | null
-  /** The open picker, or `null` when none is. */
-  readonly picker: ModelPickerState | null
+  /** The open dialog, or `null` when none is. */
+  readonly editor: EditorState | null
   /** The address the catalog is read from, which the settings dialog edits. */
   readonly catalogEndpoint: string
   /** Whether the catalog settings dialog is open. */
@@ -131,26 +153,26 @@ export interface ModelsDevFace {
   readonly saveEndpoint: (endpoint: string) => void
   /** Close the settings dialog without changing anything. */
   readonly cancelSettings: () => void
-  /** Adopt one model's published values. */
-  readonly applyModel: (routeKey: string, modelKey: string) => void
-  /** Adopt every differing model of one route. */
-  readonly applyRoute: (routeKey: string) => void
-  /** Adopt every differing model of every route, one settings write per namespace. */
-  readonly applyAll: () => void
-  /** Open the picker for a route, or for one model inside it. */
-  readonly pickModel: (routeKey: string, modelKey: string | null) => void
-  /** Ask the catalog about one model id for the open picker. */
+  /** Adopt every differing value of every writable route, one settings write per namespace. */
+  readonly adoptAll: () => void
+  /** Commit one route's staged edits as a single write. */
+  readonly saveRoute: (routeKey: string, edits: readonly RouteEdit[]) => void
+  /** Open the add-model dialog for a route. */
+  readonly openAdd: (routeKey: string) => void
+  /** Open the dialog that picks which catalog entry one model follows. */
+  readonly openEntry: (routeKey: string, modelKey: string) => void
+  /** Ask the catalog about one model id for the open dialog. */
   readonly searchModel: (modelId: string, fuzzy: boolean) => void
-  /** Ask the picker's route which models its own endpoint serves. */
+  /** Ask the open dialog's route which models its own endpoint serves. */
   readonly discoverModels: () => void
-  /** Append a new model entry to the route the open picker belongs to, following the entry it was filled from. */
+  /** Append a new model entry to the route the open dialog belongs to, following the entry it was filled from. */
   readonly addModel: (entry: NewModelEntry, binding: EntryBinding | undefined) => void
-  /** Write one edited model back, against the entry source it should follow. */
-  readonly saveModel: (edited: EditedModel, binding: EntryBinding | undefined) => void
+  /** Pin the catalog entry the open dialog's model follows. */
+  readonly bindEntry: (binding: EntryBinding | null) => void
   /** Remove one model from a route's namespace. */
   readonly removeModel: (routeKey: string, modelKey: string) => void
-  /** Close the picker without writing. */
-  readonly cancelPick: () => void
+  /** Close the open dialog without writing. */
+  readonly cancelEditor: () => void
 }
 
 /** One settings write grouped by the namespace it belongs to. */
@@ -189,6 +211,8 @@ function unmatched(provider: string, modelId: string): ModelsDevMatch {
  * A route key and a model id together identify one configured entry, because
  * each adapter refuses a duplicate model id inside one route, so the answers
  * can be read back without relying on request order.
+ * @param matches - the answers one read returned.
+ * @returns the answers, keyed for lookup.
  */
 function answersBy(matches: readonly ModelsDevMatch[]): Map<string, ModelsDevMatch> {
   return new Map(matches.map(match => [answerKey(match.provider, match.modelId), match]))
@@ -221,7 +245,7 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * Join the configured routes with the models.dev catalog and adopt what it
+ * Join the configured routes with the models.dev catalog and commit what it
  * publishes.
  *
  * One read covers the directory, the settings namespaces, and the catalog, and
@@ -238,7 +262,7 @@ export class ModelsDevController {
   /**
    * Distinguishes overlapping candidate searches. A read and a search supersede
    * each other for different reasons — one replaces the panel's rows, the other
-   * replaces the picker's list — so they do not share one counter.
+   * replaces the dialog's list — so they do not share one counter.
    */
   private searches = 0
 
@@ -274,7 +298,7 @@ export class ModelsDevController {
       routes: [],
       writing: [],
       notice: null,
-      picker: null,
+      editor: null,
       catalogEndpoint: catalog.source,
       settingsOpen: false,
     })
@@ -346,31 +370,32 @@ export class ModelsDevController {
       openSettings: () => { this.patch({ settingsOpen: true }) },
       saveEndpoint: (endpoint) => { void this.retarget(endpoint) },
       cancelSettings: () => { this.patch({ settingsOpen: false }) },
-      applyModel: (routeKey, modelKey) => { void this.apply(this.plan(routeKey, modelKey)) },
-      applyRoute: (routeKey) => { void this.apply(this.plan(routeKey, null)) },
-      applyAll: () => { void this.apply(this.plan(null, null)) },
-      pickModel: (routeKey, modelKey) => { this.open(routeKey, modelKey) },
+      adoptAll: () => { void this.adopt(this.planAll()) },
+      saveRoute: (routeKey, edits) => { void this.save(routeKey, edits) },
+      openAdd: (routeKey) => { this.open('add', routeKey, null) },
+      openEntry: (routeKey, modelKey) => { this.open('entry', routeKey, modelKey) },
       searchModel: (modelId, fuzzy) => { void this.search(modelId, fuzzy) },
       discoverModels: () => { void this.discover() },
       addModel: (entry, binding) => { void this.append(entry, binding) },
-      saveModel: (edited, binding) => { void this.save(edited, binding) },
+      bindEntry: (binding) => { this.bind(binding) },
       removeModel: (routeKey, modelKey) => { void this.remove(routeKey, modelKey) },
-      cancelPick: () => { this.patch({ picker: null }) },
+      cancelEditor: () => { this.patch({ editor: null }) },
     }
   }
 
   /**
-   * Open the picker for a route, or for one model inside it.
+   * Open one of the two dialogs for a route, or for one model inside it.
    *
    * An adapter preset brings its own profile, so the panel compares it and never
    * writes it; that holds for a model added to it as much as for a corrected
-   * value on one it already carries. The picker is the only place either is
+   * value on one it already carries. The dialogs are the only place either is
    * offered, so refusing it here refuses both at once.
    *
+   * @param mode - whether the dialog adds a model or repoints one.
    * @param routeKey - the route the model belongs to, or is being added to.
-   * @param modelKey - the model being edited, or `null` to add one.
+   * @param modelKey - the model being repointed, or `null` to add one.
    */
-  private open(routeKey: string, modelKey: string | null): void {
+  private open(mode: EditorState['mode'], routeKey: string, modelKey: string | null): void {
     const state = this.getSnapshot()
     const route = state.routes.find(row => row.key === routeKey)
     if (route === undefined || route.route.preset) return
@@ -379,11 +404,15 @@ export class ModelsDevController {
       this.patch({ notice: { kind: 'readonly' } })
       return
     }
+    const row = modelKey === null ? undefined : route.models.find(row => row.key === modelKey)
     this.patch({
-      picker: {
+      editor: {
+        mode,
         routeKey,
         modelKey,
-        modelId: '',
+        // The dialog opens on the id the model already has, so a repoint starts
+        // from the catalog answer the row was compared against.
+        modelId: row?.model.id ?? '',
         fuzzy: false,
         searching: false,
         candidates: [],
@@ -396,9 +425,9 @@ export class ModelsDevController {
   }
 
   /**
-   * Ask the catalog which entries answer to the model id the open picker holds.
+   * Ask the catalog which entries answer to the model id the open dialog holds.
    *
-   * The picker asks on every keystroke, so a search supersedes the one before it
+   * The dialog asks on every keystroke, so a search supersedes the one before it
    * and the one before that is dropped rather than published over a longer id.
    * The catalog read behind the answer is shared and cached by the service, so a
    * keystroke that arrives mid-read waits on it instead of starting another.
@@ -408,35 +437,35 @@ export class ModelsDevController {
    */
   private async search(modelId: string, fuzzy: boolean): Promise<void> {
     const state = this.getSnapshot()
-    const open = state.picker
+    const open = state.editor
     if (open === null) return
     const route = state.routes.find(row => row.key === open.routeKey)
     if (route === undefined) return
     const wanted = modelId.trim()
     if (wanted === '') {
-      this.patch({ picker: { ...open, modelId, fuzzy, searching: false, candidates: [], error: null } })
+      this.patch({ editor: { ...open, modelId, fuzzy, searching: false, candidates: [], error: null } })
       return
     }
     const search = ++this.searches
-    this.patch({ picker: { ...open, modelId, fuzzy, searching: true, candidates: [], error: null } })
+    this.patch({ editor: { ...open, modelId, fuzzy, searching: true, candidates: [], error: null } })
     try {
       const candidates = fuzzy
         ? await this.catalog.similar(route.route.provider, wanted)
         : await this.catalog.candidates(route.route.provider, wanted)
-      const picker = this.staleSearch(open.routeKey, search) ? null : this.getSnapshot().picker
-      if (picker === null) return
-      this.patch({ picker: { ...picker, searching: false, candidates, error: null } })
+      const editor = this.staleSearch(open.routeKey, search) ? null : this.getSnapshot().editor
+      if (editor === null) return
+      this.patch({ editor: { ...editor, searching: false, candidates, error: null } })
     } catch (error: unknown) {
-      const picker = this.staleSearch(open.routeKey, search) ? null : this.getSnapshot().picker
-      if (picker === null) return
+      const editor = this.staleSearch(open.routeKey, search) ? null : this.getSnapshot().editor
+      if (editor === null) return
       // A catalog that cannot be read leaves the values in place rather than an
-      // empty picker: the model is still editable, just without its entry.
-      this.patch({ picker: { ...picker, searching: false, candidates: [], error: messageOf(error) } })
+      // empty dialog: the model is still editable, just without its entry.
+      this.patch({ editor: { ...editor, searching: false, candidates: [], error: messageOf(error) } })
     }
   }
 
   /**
-   * Ask the open picker's route which models its own endpoint serves.
+   * Ask the open dialog's route which models its own endpoint serves.
    *
    * The question is answered on the Host, not here: the adapter either knows
    * the route's models from its own catalog or interrogates the endpoint, and
@@ -450,29 +479,29 @@ export class ModelsDevController {
    */
   private async discover(): Promise<void> {
     const state = this.getSnapshot()
-    const open = state.picker
+    const open = state.editor
     if (open === null) return
     const route = state.routes.find(row => row.key === open.routeKey)
     if (route === undefined) return
     const discovery = ++this.discoveries
-    this.patch({ picker: { ...open, discovering: true, discovered: null, discoverError: null } })
+    this.patch({ editor: { ...open, discovering: true, discovered: null, discoverError: null } })
     try {
       const response = await this.ctx.remote.llm.discoverModels(route.route.settingsNs, {
         provider: route.route.provider,
         ...route.route.baseURL === undefined ? {} : { baseURL: route.route.baseURL },
         ...route.route.api === undefined ? {} : { api: route.route.api },
       })
-      const picker = this.staleDiscovery(open.routeKey, discovery) ? null : this.getSnapshot().picker
-      if (picker === null) return
+      const editor = this.staleDiscovery(open.routeKey, discovery) ? null : this.getSnapshot().editor
+      if (editor === null) return
       this.patch({
-        picker: response.ok
-          ? { ...picker, discovering: false, discovered: response.value, discoverError: null }
-          : { ...picker, discovering: false, discovered: null, discoverError: response.error.message },
+        editor: response.ok
+          ? { ...editor, discovering: false, discovered: response.value, discoverError: null }
+          : { ...editor, discovering: false, discovered: null, discoverError: response.error.message },
       })
     } catch (error: unknown) {
-      const picker = this.staleDiscovery(open.routeKey, discovery) ? null : this.getSnapshot().picker
-      if (picker === null) return
-      this.patch({ picker: { ...picker, discovering: false, discovered: null, discoverError: messageOf(error) } })
+      const editor = this.staleDiscovery(open.routeKey, discovery) ? null : this.getSnapshot().editor
+      if (editor === null) return
+      this.patch({ editor: { ...editor, discovering: false, discovered: null, discoverError: messageOf(error) } })
     }
   }
 
@@ -486,7 +515,7 @@ export class ModelsDevController {
    * second caller must not reach the namespace with them either.
    *
    * The entry the values were taken from is filed as what the new model follows,
-   * exactly as an edit files one, and for the same reason: the binding decides
+   * exactly as a repoint files one, and for the same reason: the binding decides
    * what the row is compared against. A gateway id the catalog cannot reach by
    * itself is compared against that entry from the moment it exists, instead of
    * reporting that the catalog has nothing for it.
@@ -496,16 +525,16 @@ export class ModelsDevController {
    */
   private async append(entry: NewModelEntry, binding: EntryBinding | undefined): Promise<void> {
     const state = this.getSnapshot()
-    const picker = state.picker
-    if (picker === null || picker.modelKey !== null) return
-    const route = state.routes.find(row => row.key === picker.routeKey)
+    const editor = state.editor
+    if (editor === null || editor.mode !== 'add') return
+    const route = state.routes.find(row => row.key === editor.routeKey)
     if (route === undefined || route.route.preset) return
     if (!state.writable) {
-      this.patch({ picker: null, notice: { kind: 'readonly' } })
+      this.patch({ editor: null, notice: { kind: 'readonly' } })
       return
     }
     if (newModelProblem(route.route, entry) !== undefined) return
-    // Filed before the write, like an edit's, so the reload the write settles
+    // Filed before the write, like a repoint's, so the reload the write settles
     // with is the read that shows the new row following that entry. A refused
     // write leaves the choice filed for the id it names, which nothing reads
     // until a model carrying that id is configured.
@@ -513,40 +542,96 @@ export class ModelsDevController {
     await this.write(
       route.route,
       addModelOps(route.route, entry),
-      { picker: null, notice: { kind: 'added', id: entry.id.trim() } },
+      { editor: null, notice: { kind: 'added', id: entry.id.trim() } },
     )
   }
 
   /**
-   * Write one edited model back, against the entry source it should follow.
+   * Commit one route's staged edits.
    *
-   * The binding is filed first and answers nothing by itself: it decides what the
-   * panel compares the model against, while the values come from the edit. A
-   * reader who repointed the model at another entry and changed no values writes
-   * nothing at all, and the panel reloads to show the new comparison either way.
+   * Every draft is checked against the route's own rules before anything is
+   * written, so a refusal names a rule rather than arriving as a schema error
+   * over a half-written card. A model whose id the edit changed takes its
+   * browser-local entry binding with it: the binding is filed under the id the
+   * model is compared as, and leaving it under the old id would silently
+   * unpin a model that only had a typo corrected.
    *
-   * @param edited - the values the entry should end up holding.
-   * @param binding - the catalog entry to pin, or `undefined` to follow the id again.
+   * @param routeKey - the route whose card committed.
+   * @param edits - the drafts the card holds, including ones that changed nothing.
    */
-  private async save(edited: EditedModel, binding: EntryBinding | undefined): Promise<void> {
+  private async save(routeKey: string, edits: readonly RouteEdit[]): Promise<void> {
     const state = this.getSnapshot()
-    const picker = state.picker
-    if (picker === null || picker.modelKey === null) return
-    const route = state.routes.find(row => row.key === picker.routeKey)
-    const row = route?.models.find(model => model.key === picker.modelKey)
-    if (route === undefined || row === undefined || route.route.preset) return
+    const route = state.routes.find(row => row.key === routeKey)
+    if (route === undefined || route.route.preset) return
     if (!state.writable) {
-      this.patch({ picker: null, notice: { kind: 'readonly' } })
+      this.patch({ notice: { kind: 'readonly' } })
       return
     }
-    writeBinding(this.host, bindingKey(route.key, row.model.id), binding)
-    const ops = editOps(route.route, row.model, edited)
+    const ops: SettingsPathOpView[] = []
+    const renamed: { from: ConfiguredModel; to: string }[] = []
+    for (const edit of edits) {
+      const row = route.models.find(model => model.key === edit.modelKey)
+      if (row === undefined) continue
+      // A row whose staged values match what it stores is not this write's
+      // business, and checking it would let an untouched draft the adapter
+      // would refuse block the rows that did change.
+      if (!draftDiffers(edit.draft, row.model)) continue
+      const problem = draftProblem(route.route, row.model, edit.draft)
+      if (problem !== undefined) {
+        this.patch({ notice: { kind: 'invalid', problem } })
+        return
+      }
+      ops.push(...draftOps(route.route, row.model, edit.draft))
+      const id = edit.draft.id.trim()
+      if (id !== row.model.id) renamed.push({ from: row.model, to: id })
+    }
+    for (const { from, to } of renamed) this.refile(route.key, from.id, to)
     if (ops.length === 0) {
-      this.patch({ picker: null })
       await this.load(false)
       return
     }
-    await this.write(route.route, ops, { picker: null, notice: { kind: 'saved' } })
+    await this.write(route.route, ops, { notice: { kind: 'applied' } })
+  }
+
+  /**
+   * Move one model's browser-local entry binding to the id it now stores.
+   * @param routeKey - the route's panel key.
+   * @param from - the id the binding was filed under.
+   * @param to - the id the model now carries.
+   */
+  private refile(routeKey: string, from: string, to: string): void {
+    const bindings = readBindings(this.host)
+    const binding = bindings.get(bindingKey(routeKey, from))
+    if (binding === undefined) return
+    writeBinding(this.host, bindingKey(routeKey, from), undefined)
+    writeBinding(this.host, bindingKey(routeKey, to), binding)
+  }
+
+  /**
+   * Pin the catalog entry the open dialog's model follows.
+   *
+   * The binding decides what the model is compared against and never what is
+   * written, so this is not a settings write: it is filed for this browser and
+   * followed by the re-read that shows the new comparison. A model that already
+   * diverged from the newly pinned entry keeps its stored values — adopting
+   * them is the card's own edit, where the reader can see what changes.
+   *
+   * @param binding - the entry to pin, or `null` to follow the id again.
+   */
+  private bind(binding: EntryBinding | null): void {
+    const state = this.getSnapshot()
+    const editor = state.editor
+    if (editor === null || editor.mode !== 'entry' || editor.modelKey === null) return
+    const route = state.routes.find(row => row.key === editor.routeKey)
+    const row = route?.models.find(model => model.key === editor.modelKey)
+    if (route === undefined || row === undefined || route.route.preset) return
+    if (!state.writable) {
+      this.patch({ editor: null, notice: { kind: 'readonly' } })
+      return
+    }
+    writeBinding(this.host, bindingKey(route.key, row.model.id), binding ?? undefined)
+    this.patch({ editor: null, notice: { kind: 'bound' } })
+    void this.load(false)
   }
 
   /**
@@ -571,7 +656,7 @@ export class ModelsDevController {
     }
     writeBinding(this.host, bindingKey(route.key, row.model.id), undefined)
     await this.write(route.route, removeModelOps(route.route, row.model), {
-      picker: null,
+      editor: null,
       notice: { kind: 'removed', id: row.model.id },
     })
   }
@@ -582,7 +667,7 @@ export class ModelsDevController {
    *
    * The write's own outcome is a fact even when the Host broadcast it and a
    * re-read took over underneath: the read counter would drop this settlement
-   * and leave the picker open over a model that has already changed.
+   * and leave a dialog open over a model that has already changed.
    *
    * @param route - the route whose namespace is being written.
    * @param ops - the edits to make.
@@ -609,26 +694,21 @@ export class ModelsDevController {
   }
 
   /**
-   * Group the selected rows into one settings write per namespace.
+   * Group every differing model of every writable route into one write per
+   * namespace.
    *
    * Two routes can share a namespace, and a namespace carries one revision, so
    * a namespace's rows travel together in a single write that the revision
    * still guards. A preset route contributes nothing: the adapter ships that
    * route's profile, so its differences are shown and never written.
    *
-   * @param routeKey - the selected route, or `null` for every route.
-   * @param modelKey - the selected model inside that route, or `null` for all of them.
    * @returns the writes to run, in route order.
    */
-  private plan(routeKey: string | null, modelKey: string | null): WriteGroup[] {
+  private planAll(): WriteGroup[] {
     const groups = new Map<string, WriteGroup>()
     for (const route of this.getSnapshot().routes) {
       if (route.route.preset) continue
-      if (routeKey !== null && route.key !== routeKey) continue
-      const rows = modelKey === null
-        ? route.models
-        : route.models.filter(row => row.key === modelKey)
-      const ops = rows.flatMap(row => applyOps(route.route, row.model, row.differences))
+      const ops = route.models.flatMap(row => applyOps(route.route, row.model, row.differences))
       if (ops.length === 0) continue
       const existing = groups.get(route.route.settingsNs)
       groups.set(route.route.settingsNs, existing === undefined
@@ -645,7 +725,7 @@ export class ModelsDevController {
    * remaining namespaces are left for the next selection.
    * @param groups - the writes to run.
    */
-  private async apply(groups: readonly WriteGroup[]): Promise<void> {
+  private async adopt(groups: readonly WriteGroup[]): Promise<void> {
     if (groups.length === 0) return
     if (!this.getSnapshot().writable) {
       this.patch({ notice: { kind: 'readonly' } })
@@ -667,7 +747,7 @@ export class ModelsDevController {
           return
         }
       }
-      this.patch({ notice: { kind: 'applied' } })
+      this.patch({ notice: { kind: 'adopted' } })
       await this.load(false)
     } finally {
       // Every exit releases the lock. Writing a namespace makes the Host
@@ -764,12 +844,12 @@ export class ModelsDevController {
 
   /**
    * Whether one candidate search settled too late to publish, either because a
-   * newer keystroke replaced it or because its picker is no longer open.
+   * newer keystroke replaced it or because its dialog is no longer open.
    */
   private staleSearch(routeKey: string, search: number): boolean {
     if (this.unloaded || search !== this.searches) return true
-    const picker = this.getSnapshot().picker
-    return picker === null || picker.routeKey !== routeKey
+    const editor = this.getSnapshot().editor
+    return editor === null || editor.routeKey !== routeKey
   }
 
   /**
@@ -778,8 +858,8 @@ export class ModelsDevController {
    */
   private staleDiscovery(routeKey: string, discovery: number): boolean {
     if (this.unloaded || discovery !== this.discoveries) return true
-    const picker = this.getSnapshot().picker
-    return picker === null || picker.routeKey !== routeKey
+    const editor = this.getSnapshot().editor
+    return editor === null || editor.routeKey !== routeKey
   }
 
   /**

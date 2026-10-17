@@ -12,8 +12,8 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PickerTranslate } from './ModelPicker.tsx'
-import css from './ModelsDevPage.module.css'
+import type { Translate } from './ModelFields.tsx'
+import css from './ModelsDevPanel.module.css'
 
 /** Everything the dialog needs from the panel around it. */
 export interface CatalogSettingsDialogProps {
@@ -24,7 +24,7 @@ export interface CatalogSettingsDialogProps {
   /** The address the panel reads from when no override is stored. */
   readonly defaultEndpoint: string
   /** The panel's dictionary seat. */
-  readonly t: PickerTranslate
+  readonly t: Translate
   /** Store the address and read again. */
   readonly onSave: (endpoint: string) => void
   /** Close without changing anything. */
@@ -51,24 +51,24 @@ export function CatalogSettingsDialog({
   // is what the reader is shown.
   useEffect(() => { if (open) setValue(endpoint) }, [open, endpoint])
   const changed = value.trim() !== endpoint
-  const save = (): void => { onSave(value) }
   return (
     <Modal
       open={open}
       onClose={onClose}
       title={t('settingsTitle')}
-      closeLabel={t('addModelClose')}
+      closeLabel={t('close')}
       description={t('settingsDescription')}
+      className={css['dialog'] as string}
       footer={(
         <>
-          <Button variant="outline" onClick={onClose}>{t('addModelCancel')}</Button>
-          <Button variant="primary" disabled={!changed} onClick={save}>{t('settingsSave')}</Button>
+          <Button variant="outline" onClick={onClose}>{t('cancel')}</Button>
+          <Button variant="primary" disabled={!changed} onClick={() => { onSave(value) }}>{t('settingsSave')}</Button>
         </>
       )}
     >
-      <div className={css.addForm}>
-        <label className={css.addField}>
-          <span className={css.addFieldName}>{t('settingsEndpoint')}</span>
+      <div className={css['addForm']}>
+        <label className={css['specField']}>
+          <span className={css['specLabel']}>{t('settingsEndpoint')}</span>
           <Input
             value={value}
             placeholder={t('settingsEndpointPlaceholder', { endpoint: defaultEndpoint })}
@@ -76,8 +76,8 @@ export function CatalogSettingsDialog({
             onChange={event => { setValue(event.target.value) }}
           />
         </label>
-        <p className={css.meta}>{t('settingsNote')}</p>
-        {value.trim() === '' ? <p className={css.meta}>{t('settingsReset', { endpoint: defaultEndpoint })}</p> : null}
+        <p className={css['hint']}>{t('settingsNote')}</p>
+        {value.trim() === '' ? <p className={css['hint']}>{t('settingsReset', { endpoint: defaultEndpoint })}</p> : null}
       </div>
     </Modal>
   )

@@ -7,9 +7,9 @@
 
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ModelsDevMatch, ModelsDevModality, ReasoningEfforts } from './types.ts'
-import { REASONING_LEVELS } from './types.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ConfiguredModel, ConfiguredRoute, ModalityField } from './configured.ts'
+import { sameEfforts, sameModalities } from './draft.ts'
 
 /**
  * Stored field a difference is about. The two modality field names are both
@@ -31,25 +31,6 @@ export interface FieldDifference {
 /** Whether one difference is about the accepted modalities. */
 export function isModalityDifference(difference: FieldDifference): boolean {
   return difference.field === 'input' || difference.field === 'inputModalities'
-}
-
-/**
- * Compare two reasoning-effort declarations level by level, treating an absent
- * level and an absent declaration as the same "nothing here" answer.
- */
-function sameEfforts(left: ReasoningEfforts | undefined, right: ReasoningEfforts | undefined): boolean {
-  if (left === right) return true
-  if (left === undefined || right === undefined) return false
-  if (left === false || right === false) return left === right
-  for (const level of REASONING_LEVELS) {
-    if ((left[level] ?? null) !== (right[level] ?? null)) return false
-  }
-  return true
-}
-
-/** Compare two modality lists as sets, so order alone is not a difference. */
-function sameModalities(left: readonly ModelsDevModality[], right: readonly ModelsDevModality[]): boolean {
-  return left.length === right.length && left.every(entry => right.includes(entry))
 }
 
 /**
@@ -85,67 +66,6 @@ function writtenValue(difference: FieldDifference): JsonValue {
   if (difference.published === false) return false
   if (difference.field === 'reasoningEfforts') return { ...(difference.published as Exclude<ReasoningEfforts, false | undefined>) }
   return [...difference.published as readonly ModelsDevModality[]]
-}
-
-/** The values one edited model entry should end up holding. */
-export interface EditedModel {
-  /** Display name, or an empty string to leave the entry without one. */
-  readonly name: string
-  /** Combined context, or absent to fall back to the adapter's own. */
-  readonly contextWindow?: number
-  /** Output cap, or absent to fall back to the adapter's own. */
-  readonly maxTokens?: number
-  /** Accepted modalities the entry should declare. */
-  readonly inputModalities: readonly ModelsDevModality[]
-  /** Reasoning efforts the entry should declare, or `undefined` to leave the field to the adapter. */
-  readonly reasoningEfforts?: ReasoningEfforts
-}
-
-/**
- * Build the edits that put one edited model into the namespace.
- *
- * Unlike adopting a catalog entry, an edit is free to clear a field, and a
- * cleared field is the one case the settings document answers by itself: an
- * unset hands the field back to whatever the adapter or composition base
- * declares, which is what "unset this" has to mean for a value the deployment
- * never wrote in the first place.
- *
- * Only fields the edit actually changed are written, so a reader who opened a
- * model to repoint it at another entry and changed nothing writes nothing.
- *
- * @param route - the provider route whose namespace holds the model.
- * @param model - the configured model entry, whose index is its write address.
- * @param edited - the values the entry should end up holding.
- * @returns one path-addressed edit per changed field.
- */
-export function editOps(route: ConfiguredRoute, model: ConfiguredModel, edited: EditedModel): SettingsPathOpView[] {
-  const base = [...route.settingsPath, 'models', String(model.index)]
-  const ops: SettingsPathOpView[] = []
-  const name = edited.name.trim()
-  if (name !== (model.name ?? '')) {
-    ops.push(name === ''
-      ? { op: 'unset', path: [...base, 'name'] }
-      : { op: 'set', path: [...base, 'name'], value: name })
-  }
-  const capacities = [
-    ['contextWindow', edited.contextWindow, model.contextWindow],
-    ['maxTokens', edited.maxTokens, model.maxTokens],
-  ] as const
-  for (const [field, wanted, stored] of capacities) {
-    if (wanted === stored) continue
-    ops.push(wanted === undefined
-      ? { op: 'unset', path: [...base, field] }
-      : { op: 'set', path: [...base, field], value: wanted })
-  }
-  if (model.modalityField !== undefined && !sameModalities(model.inputModalities, edited.inputModalities)) {
-    ops.push({ op: 'set', path: [...base, model.modalityField], value: [...edited.inputModalities] })
-  }
-  if (!sameEfforts(model.reasoningEfforts, edited.reasoningEfforts)) {
-    ops.push(edited.reasoningEfforts === undefined
-      ? { op: 'unset', path: [...base, 'reasoningEfforts'] }
-      : { op: 'set', path: [...base, 'reasoningEfforts'], value: writtenValue({ field: 'reasoningEfforts', configured: undefined, published: edited.reasoningEfforts }) })
-  }
-  return ops
 }
 
 /**

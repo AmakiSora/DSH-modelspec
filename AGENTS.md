@@ -54,18 +54,11 @@ patch release.
 | A new feature, or a documented behaviour added | MINOR | `0.1.0` → `0.2.0` |
 | Anything incompatible with the list above | MAJOR | `1.2.3` → `2.0.0` |
 
-While the project is on `0.y.z` — which it is, deliberately, until the panel's behaviour has
-been relied on — SemVer leaves `y` free to break. So on `0.x` the third row moves the
-**minor**, not the major:
-
-| Change | Bump while `0.y.z` | Example |
-| --- | --- | --- |
-| PATCH-level | PATCH | `0.1.0` → `0.1.1` |
-| MINOR-level, including a breaking one | MINOR | `0.1.0` → `0.2.0` |
-
-`1.0.0` is a decision that the panel is worth depending on, made once and on purpose. No
-single feature is allowed to roll the version into it by accident, which is why
-`tests/release.spec.ts` asserts the version still starts with `0.`.
+While the project was on `0.y.z`, SemVer left `y` free to break, and the project used that to
+land breaking changes as minor bumps. **It is on `1.0.0` now**, and the promise that number
+makes is the ordinary table above: an incompatible change is a major bump. That was a decision
+made once and on purpose, which is why `tests/release.spec.ts` asserts the major is at least
+`1` rather than letting a number roll over by accident.
 
 ### Releasing
 
@@ -188,9 +181,23 @@ release to learn.
   the same row: a profile that does both composes two entries under one id.
 - **Components hold no Host access.** Host reads and writes live in `src/client/store.ts`;
   a component receives plain data and callbacks.
+- **The editor writes only on Apply.** A card's rows hold staged values, the panel's bulk
+  adopt is refused while anything is staged, and `saveRoute` writes only the fields a draft
+  actually changed. A component that wrote on a keystroke, or a card that applied itself,
+  would break the one property the layout was rebuilt for: what will be stored is visible
+  before it is.
+- **A fresh draft of what the deployment stores is clean.** `draftOf` must round-trip every
+  entry it can be handed — a reasoning dict without `off`, a model that declares no input
+  types, a capacity the namespace never materialized. Inventing a value the reader did not
+  choose makes every such card open as an unsaved edit, and the panel reports configuration
+  as broken that is merely terse.
+- **A staged draft is bound to the model it was opened from.** It carries its base id, and a
+  re-read that shifts the rows discards it rather than applying one model's edits to another.
 
 ## Layout
 
 `README.md` ends with a file-by-file map. The short version: `store.ts` owns state and
-writes, `match.ts` and `catalog*.ts` own the catalog, `comparison.ts` and `add-model.ts` own
-the edits, and the `.tsx` files render what they are handed.
+writes, `match.ts` and `catalog*.ts` own the catalog, `configured.ts` reads the deployment,
+`draft.ts` owns the editor's staged values and the write that commits them, `comparison.ts`
+owns the published differences, `add-model.ts` owns appending, and the `.tsx` files render
+what they are handed.

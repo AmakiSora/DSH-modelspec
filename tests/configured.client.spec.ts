@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import type { LlmConfigurableProvider, SettingsDescribeValue, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { readRoutes } from '../src/client/configured.ts'
+import { draftDiffers, draftOf, draftOps } from '../src/client/draft.ts'
 
 /** One directory entry for a route the deployment declared. */
 function entry(overrides: Partial<LlmConfigurableProvider> = {}): LlmConfigurableProvider {
@@ -265,5 +266,34 @@ describe('configured routes', () => {
     expect(routes.map(route => [route.provider, route.preset])).toEqual([
       ['declared', false], ['shipped', true], ['undistinguished', true],
     ])
+  })
+})
+
+describe('a route as the deployment configures it', () => {
+  it('opens in the editor with nothing staged, whatever its models declare', () => {
+    // The editor may only show a card as holding unsaved edits when the
+    // deployment itself disagrees with what a fresh draft would write. A model
+    // that declares a reasoning dict without `off`, or no input types at all, is
+    // ordinary configuration rather than a pending change.
+    const routes = readRoutes([entry({ provider: 'cosmos', displayName: 'COSMOS', settingsPath: ['providers', 'cosmos'] })], described([
+      view('llm-pi-ai', {
+        providers: {
+          cosmos: {
+            models: [
+              { id: 'a', name: 'A', contextWindow: 1048576, maxTokens: 943718, input: ['text'], reasoningEfforts: { low: 'low', high: 'high' } },
+              { id: 'b', input: ['text'], reasoningEfforts: { off: null, high: 'high', xhigh: 'xhigh' } },
+              { id: 'c', input: [] },
+            ],
+          },
+        },
+      }),
+    ]))
+    const route = routes[0]
+    expect(route).toBeDefined()
+    for (const model of route?.models ?? []) {
+      const draft = draftOf(model)
+      expect({ id: model.id, dirty: draftDiffers(draft, model) }).toEqual({ id: model.id, dirty: false })
+      expect(draftOps(route!, model, draft)).toEqual([])
+    }
   })
 })

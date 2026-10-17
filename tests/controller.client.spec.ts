@@ -1,7 +1,8 @@
 /**
  * The panel's controller: one read covering the directory, the settings
  * namespaces, and the catalog; the comparison it publishes; the writes that
- * adopt a selection; and the settlements that arrive too late to matter.
+ * commit a card's staged edits or adopt every difference; the two dialogs; and
+ * the settlements that arrive too late to matter.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -10,10 +11,11 @@ import type {
   LlmConfigurableProvider, LlmDiscoveredModel, LlmModelDiscoveryRequest, SettingsDescribeValue, SettingsPathOpView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { ModelsDevCatalog, ModelsDevError } from '../src/client/catalog-service.ts'
-import { bindingHost, bindingKey, readBindings } from '../src/client/bindings.ts'
+import { bindingHost, bindingKey, readBindings, writeBinding } from '../src/client/bindings.ts'
 import type { ModelsDevCandidate, ModelsDevCatalogView, ModelsDevLookup, ModelsDevMatch, ModelsDevSimilar } from '../src/client/types.ts'
-import { ModelsDevController } from '../src/client/store.ts'
+import { ModelsDevController, type ModelRowView } from '../src/client/store.ts'
 import type { NewModelEntry } from '../src/client/add-model.ts'
+import { draftOf } from '../src/client/draft.ts'
 
 /** One redacted namespace view. */
 function view(ns: string, value: unknown, revision = 1): SettingsDescribeValue['namespaces'][number] {
@@ -89,7 +91,7 @@ interface Script {
   directoryRefusal?: RemoteError
   /** Reject the provider directory instead of answering it. */
   directoryFailure?: Error
-  /** Refuse the catalog read instead of answering it. */
+  /** Reject the catalog read instead of answering it. */
   catalogFailure?: Error
 }
 
@@ -143,8 +145,9 @@ function bench(script: Partial<Script> = {}): Bench {
   }
   const catalog = {
     source: live.catalog.source,
-    view: () => {
+    view: (force?: boolean) => {
       reads.catalog += 1
+      if (force === true) reads.refresh += 1
       return live.catalogFailure === undefined
         ? Promise.resolve(live.catalog)
         : Promise.reject(live.catalogFailure)
@@ -202,17 +205,28 @@ async function settle(): Promise<void> {
   for (let turn = 0; turn < 10; turn += 1) await Promise.resolve()
 }
 
+/** The one row a bench publishes under a route key. */
+function rowOf(seat: Bench, routeKey = 'llm-pi-ai/acme', index = 0): ModelRowView {
+  const row = seat.panel.getSnapshot().routes.find(route => route.key === routeKey)?.models[index]
+  if (row === undefined) throw new Error(`no row ${routeKey}/${String(index)}`)
+  return row
+}
+
+/** One staged edit of the row's own values. */
+function edited(row: ModelRowView, change: Partial<ReturnType<typeof draftOf>> = {}): { modelKey: string; draft: ReturnType<typeof draftOf> } {
+  return { modelKey: row.key, draft: { ...draftOf(row.model), ...change } }
+}
+
 describe('panel controller reads', () => {
   it('starts idle with nothing published', () => {
     expect(bench().panel.getSnapshot()).toMatchObject({ status: 'idle', routes: [], catalog: null, writable: false })
   })
 
   it('publishes one route per directory entry with the catalog facts and the matches', async () => {
-    const { panel } = readyBench()
+    const seat = readyBench()
     await settle()
-    expect(panel.getSnapshot()).toMatchObject({ status: 'ready', writable: true, catalog: CATALOG })
-    const row = panel.getSnapshot().routes[0]?.models[0]
-    expect(row).toMatchObject({
+    expect(seat.panel.getSnapshot()).toMatchObject({ status: 'ready', writable: true, catalog: CATALOG })
+    expect(rowOf(seat)).toMatchObject({
       key: 'llm-pi-ai/acme/0',
       differences: [
         { field: 'contextWindow', configured: 1024, published: 1048576 },
@@ -222,188 +236,139 @@ describe('panel controller reads', () => {
   })
 
   it('leaves out every dormant catalog route and reads no catalog at all', async () => {
-    const directory = Array.from({ length: 40 }, (_unused, index) =>
-      entry({ provider: `route-${index}`, settingsPath: ['providers', `route-${index}`] }))
     const { panel, reads } = bench({
-      directory,
-      described: described([view('llm-pi-ai', { providers: { acme: { models: [] } } })]),
+      directory: [entry(), entry({ provider: 'other', settingsPath: ['providers', 'other'] })],
+      // Neither route resolves a profile that declares a model, so the panel has
+      // nothing to compare and leaves the catalog unread.
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [] }, other: { models: [] } } })]),
     })
     panel.inject().ensure()
     await settle()
+    expect(panel.getSnapshot().routes).toEqual([])
     expect(reads.catalog).toBe(0)
-    expect(panel.getSnapshot()).toMatchObject({ status: 'ready', routes: [], catalog: null })
   })
 
   it('reports a model the catalog answered nothing for as unmatched', async () => {
-    const { panel } = bench({
-      directory: [entry()],
-      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'gone', input: ['text'] }] } } })]),
-    })
-    panel.inject().ensure()
-    await settle()
-    expect(panel.getSnapshot().routes[0]?.models[0]).toMatchObject({
-      match: { provider: 'acme', modelId: 'gone', strategy: 'none' },
-      differences: [],
-    })
-  })
-
-  it('surfaces a refused provider directory as one diagnostic', async () => {
-    const { panel } = bench({
-      directoryRefusal: new RemoteError('gateway/internal', 'the adapter directory is absent', {}),
-    })
-    panel.inject().ensure()
-    await settle()
-    expect(panel.getSnapshot()).toMatchObject({ status: 'error', error: 'the adapter directory is absent' })
-  })
-
-  it('surfaces a rejected read with the message it reports', async () => {
-    const { panel } = bench({ directoryFailure: new Error('the transport closed') })
-    panel.inject().ensure()
-    await settle()
-    expect(panel.getSnapshot()).toMatchObject({ status: 'error', error: 'the transport closed' })
-  })
-
-  it('surfaces a catalog refusal with the message the read reported', async () => {
-    const seat = bench()
-    seat.panel.dispose()
-    const failing = new ModelsDevController({
-      remote: {
-        llm: { listConfigurableProviders: () => Promise.resolve({ ok: true, value: [] }) },
-        settings: {
-          describe: () => Promise.reject(new ModelsDevError('the server answered HTTP 503', CATALOG.source)),
-          mutate: () => Promise.resolve({ ok: true, value: {} }),
-        },
-      },
-    } as never, new ModelsDevCatalog())
-    failing.inject().ensure()
-    await settle()
-    expect(failing.getSnapshot()).toMatchObject({ status: 'error', error: 'the server answered HTTP 503' })
-  })
-
-  it('reads the catalog again only when a refresh is asked for', async () => {
-    const { panel, reads } = bench({
-      directory: [entry()],
-      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'a', input: ['text'] }] } } })]),
-    })
-    panel.inject().ensure()
-    await settle()
-    expect(reads).toEqual({ catalog: 1, refresh: 0, match: 1 })
-    panel.inject().refresh()
-    await settle()
-    expect(reads).toEqual({ catalog: 2, refresh: 0, match: 2 })
-  })
-
-  it('re-reads the configuration without re-reading the catalog when it is invalidated', async () => {
     const seat = bench({
       directory: [entry()],
-      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'a', input: ['text'] }] } } })]),
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1' }] } } })]),
     })
     seat.panel.inject().ensure()
     await settle()
-    seat.panel.invalidate()
-    await settle()
-    expect(seat.reads.catalog).toBe(2)
-    expect(seat.reads.refresh).toBe(0)
+    expect(rowOf(seat)).toMatchObject({ match: { strategy: 'none' }, differences: [] })
   })
 
-  it('ignores an invalidation after the controller was unloaded', async () => {
-    const { panel, reads } = bench()
-    panel.dispose()
-    panel.invalidate()
+  it('surfaces a refused provider directory as one diagnostic', async () => {
+    const { panel } = bench({ directoryRefusal: new RemoteError('llm/unsupported', 'no directory', {}) })
+    panel.inject().ensure()
     await settle()
-    expect(reads.catalog).toBe(0)
-    expect(panel.getSnapshot().status).toBe('idle')
+    expect(panel.getSnapshot()).toMatchObject({ status: 'error', error: 'no directory' })
   })
 
-  it('drops a read that settles after the controller was unloaded', async () => {
+  it('surfaces a rejected read with the message it reports', async () => {
+    const { panel } = bench({ directoryFailure: new Error('socket gone') })
+    panel.inject().ensure()
+    await settle()
+    expect(panel.getSnapshot()).toMatchObject({ status: 'error', error: 'socket gone' })
+  })
+
+  it('surfaces a catalog refusal as a diagnostic beside the configured rows', async () => {
     const { panel } = bench({
       directory: [entry()],
-      described: described([view('llm-pi-ai', { providers: { acme: { models: [] } } })]),
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1' }] } } })]),
+      catalogFailure: new ModelsDevError('catalog unavailable', 'https://example.test/models'),
     })
+    panel.inject().ensure()
+    await settle()
+    expect(panel.getSnapshot()).toMatchObject({ status: 'ready', catalog: null, catalogError: 'catalog unavailable' })
+    expect(panel.getSnapshot().routes).toHaveLength(1)
+  })
+
+  it('reads the catalog again only when a refresh is asked for', async () => {
+    const seat = readyBench()
+    await settle()
+    const before = seat.reads.refresh
+    seat.panel.invalidate()
+    await settle()
+    expect(seat.reads.refresh).toBe(before)
+    seat.panel.inject().refresh()
+    await settle()
+    expect(seat.reads.refresh).toBe(before + 1)
+  })
+
+  it('publishes nothing from a read that settles after the controller was unloaded', async () => {
+    const { panel } = bench({ directory: [entry()] })
     panel.inject().ensure()
     panel.dispose()
     await settle()
-    expect(panel.getSnapshot()).toMatchObject({ status: 'loading', routes: [] })
+    expect(panel.getSnapshot()).toMatchObject({ routes: [], catalog: null })
   })
 
   it('lets the newest read publish and drops the one it superseded', async () => {
-    const { panel } = bench()
-    panel.inject().refresh()
-    panel.inject().ensure()
+    const seat = bench({
+      directory: [entry()],
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1' }] } } })]),
+      matches: [matchFor('acme', 'acme-1')],
+    })
+    seat.panel.inject().ensure()
+    seat.panel.invalidate()
     await settle()
-    expect(panel.getSnapshot()).toMatchObject({ status: 'ready', refreshing: false })
+    expect(seat.panel.getSnapshot().routes).toHaveLength(1)
   })
 })
 
-describe('panel controller writes', () => {
-  it('writes one selected model and reloads afterwards', async () => {
-    const { panel, writes } = readyBench()
+describe('panel controller adopts every difference', () => {
+  it('writes every differing value of every route, each under its own namespace', async () => {
+    const seat = readyBench()
     await settle()
-    panel.inject().applyModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    seat.panel.inject().adoptAll()
     await settle()
-    expect(writes).toEqual([
+    expect(seat.writes).toEqual([
       { op: 'set', path: ['providers', 'acme', 'models', '0', 'contextWindow'], value: 1048576 },
       { op: 'set', path: ['providers', 'acme', 'models', '0', 'input'], value: ['text', 'image'] },
     ])
-    expect(panel.getSnapshot().notice).toEqual({ kind: 'applied' })
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'adopted' })
   })
 
-  it('writes nothing when the selection has no difference to adopt', async () => {
-    const { panel, writes, script } = bench({
+  it('writes one namespace at a time when two routes differ', async () => {
+    const { panel, writes } = bench({
+      directory: [entry(), entry({ provider: 'other', settingsNs: 'llm-deepseek', settingsPath: [] })],
+      described: described([
+        view('llm-pi-ai', { providers: { acme: { models: [{ id: 'a', input: ['text'] }] } } }),
+        view('llm-deepseek', { models: [{ id: 'b', inputModalities: ['text'] }] }),
+      ]),
+      matches: [matchFor('acme', 'a', { contextWindow: 1024 }), matchFor('other', 'b', { contextWindow: 2048 })],
+    })
+    panel.inject().ensure()
+    await settle()
+    panel.inject().adoptAll()
+    await settle()
+    expect(writes.map(op => op.path[0])).toEqual(['providers', 'models'])
+  })
+
+  it('writes nothing when nothing differs', async () => {
+    const { panel, writes } = bench({
       directory: [entry()],
       described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1', contextWindow: 1048576, input: ['text', 'image'] }] } } })]),
       matches: [matchFor('acme', 'acme-1', { contextWindow: 1048576, inputModalities: ['text', 'image'] })],
     })
     panel.inject().ensure()
     await settle()
-    panel.inject().applyAll()
+    panel.inject().adoptAll()
     await settle()
     expect(writes).toEqual([])
-    expect(script.matches).toHaveLength(1)
-  })
-
-  it('writes every route that differs, each under its own namespace', async () => {
-    const { panel, writes } = bench({
-      directory: [entry(), entry({ provider: 'other', settingsNs: 'llm-deepseek', settingsPath: [] })],
-      described: described([
-        view('llm-pi-ai', { providers: { acme: { models: [{ id: 'a', input: ['text'] }] } } }),
-        view('llm-deepseek', { models: [{ id: 'b', inputModalities: ['text'] }] }),
-      ]),
-      matches: [matchFor('acme', 'a', { contextWindow: 1024 }), matchFor('other', 'b', { contextWindow: 2048 })],
-    })
-    panel.inject().ensure()
-    await settle()
-    panel.inject().applyAll()
-    await settle()
-    expect(writes.map(op => op.path[0])).toEqual(['providers', 'models'])
-  })
-
-  it('writes only the addressed route when one route is selected', async () => {
-    const { panel, writes } = bench({
-      directory: [entry(), entry({ provider: 'other', settingsNs: 'llm-deepseek', settingsPath: [] })],
-      described: described([
-        view('llm-pi-ai', { providers: { acme: { models: [{ id: 'a', input: ['text'] }] } } }),
-        view('llm-deepseek', { models: [{ id: 'b', inputModalities: ['text'] }] }),
-      ]),
-      matches: [matchFor('acme', 'a', { contextWindow: 1024 }), matchFor('other', 'b', { contextWindow: 2048 })],
-    })
-    panel.inject().ensure()
-    await settle()
-    panel.inject().applyRoute('llm-deepseek/other')
-    await settle()
-    expect(writes).toEqual([{ op: 'set', path: ['models', '0', 'contextWindow'], value: 2048 }])
   })
 
   it('refuses to write into a deployment that does not accept settings writes', async () => {
-    const { panel, writes } = readyBench(false)
+    const seat = readyBench(false)
     await settle()
-    panel.inject().applyAll()
+    seat.panel.inject().adoptAll()
     await settle()
-    expect(writes).toEqual([])
-    expect(panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
+    expect(seat.writes).toEqual([])
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
   })
 
-  it('writes nothing into an adapter preset route, whichever action names it', async () => {
+  it('writes nothing into an adapter preset route', async () => {
     const { panel, writes } = bench({
       // Exactly what llm-deepseek-api-key registers: the adapter brings this
       // route itself and answers no `declared` question about it.
@@ -415,11 +380,7 @@ describe('panel controller writes', () => {
     await settle()
     // The comparison is still published; only the write is withheld.
     expect(panel.getSnapshot().routes[0]?.models[0]?.differences).toHaveLength(1)
-    panel.inject().applyModel('llm-deepseek-api-key/deepseek-official', 'llm-deepseek-api-key/deepseek-official/0')
-    await settle()
-    panel.inject().applyRoute('llm-deepseek-api-key/deepseek-official')
-    await settle()
-    panel.inject().applyAll()
+    panel.inject().adoptAll()
     await settle()
     expect(writes).toEqual([])
   })
@@ -428,9 +389,9 @@ describe('panel controller writes', () => {
     const seat = readyBench()
     await settle()
     // Writing a namespace makes the Host broadcast `settings/document-updated`,
-    // which invalidates the read this selection is running under.
+    // which invalidates the read this write is running under.
     seat.script.broadcast = () => { seat.panel.invalidate() }
-    seat.panel.inject().applyAll()
+    seat.panel.inject().adoptAll()
     await settle()
     expect(seat.writes).toHaveLength(2)
     expect(seat.panel.getSnapshot().writing).toEqual([])
@@ -438,772 +399,443 @@ describe('panel controller writes', () => {
   })
 
   it('reports a stale revision as a conflict', async () => {
-    const { panel, script, writes } = readyBench()
+    const seat = readyBench()
     await settle()
-    script.mutate = () => ({
+    seat.script.mutate = () => ({
       ok: false,
       error: new RemoteError('settings/conflict', 'the namespace moved', { ns: 'llm-pi-ai', expected: 1, actual: 2 }),
     })
-    panel.inject().applyAll()
+    seat.panel.inject().adoptAll()
     await settle()
-    expect(panel.getSnapshot().notice).toEqual({ kind: 'conflict' })
-    expect(writes).toHaveLength(2)
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'conflict' })
   })
 
   it('reports a namespace refusal with the host message', async () => {
-    const { panel, script } = readyBench()
+    const seat = readyBench()
     await settle()
-    script.mutate = () => ({
+    seat.script.mutate = () => ({
       ok: false,
-      error: new RemoteError('settings/rejected', 'model ids must be unique', { ns: 'llm-pi-ai' }),
+      error: new RemoteError('settings/refused', 'the schema says no', {}),
     })
-    panel.inject().applyAll()
+    seat.panel.inject().adoptAll()
     await settle()
-    expect(panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'model ids must be unique' })
-  })
-
-  it('stops before the next namespace when the panel unloads mid-write', async () => {
-    const { panel, writes } = bench({
-      directory: [entry(), entry({ provider: 'other', settingsNs: 'llm-deepseek', settingsPath: [] })],
-      described: described([
-        view('llm-pi-ai', { providers: { acme: { models: [{ id: 'a', input: ['text'] }] } } }),
-        view('llm-deepseek', { models: [{ id: 'b', inputModalities: ['text'] }] }),
-      ]),
-      matches: [matchFor('acme', 'a', { contextWindow: 1024 }), matchFor('other', 'b', { contextWindow: 2048 })],
-    })
-    panel.inject().ensure()
-    await settle()
-    panel.inject().applyAll()
-    panel.dispose()
-    await settle()
-    expect(writes).toEqual([
-      { op: 'set', path: ['providers', 'acme', 'models', '0', 'contextWindow'], value: 1024 },
-    ])
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'the schema says no' })
   })
 })
 
-/** One candidate the catalog answers a model id with. */
-function candidate(providerId: string, id: string, published: Record<string, unknown> = {}): ModelsDevCandidate {
-  return {
-    providerId,
-    strategy: 'exact',
-    model: {
-      providerId,
-      id,
-      name: id,
-      inputModalities: ['text'],
-      reasoning: false,
-      toolCall: true,
-      structuredOutput: false,
-      temperature: true,
-      ...published,
-    },
-  }
-}
-
-/** One route holding one model, ready to accept another. */
-function addBench(script: Partial<Script> = {}): Bench {
-  return bench({
-    directory: [entry()],
-    described: described(
-      [view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1', contextWindow: 131072, input: ['text'] }] } } })],
-    ),
-    ...script,
-  })
-}
-
-/** The draft one dialog would hand over for a matched entry. */
-const DRAFT: NewModelEntry = {
-  id: 'acme-2',
-  name: 'Acme 2',
-  contextWindow: 200000,
-  maxTokens: 8192,
-  inputModalities: ['text', 'image'],
-  modalityField: 'input',
-}
-
-describe('panel controller adds a model', () => {
-  it('opens the dialog for a route, and closes it again without writing', async () => {
-    const { panel, writes } = addBench()
-    const face = panel.inject()
-    face.ensure()
+describe('panel controller commits a card', () => {
+  it('writes only the fields the card changed, in one write', async () => {
+    const seat = readyBench()
     await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    expect(panel.getSnapshot().picker).toEqual({
-      routeKey: 'llm-pi-ai/acme',
-      modelKey: null,
-      modelId: '',
-      fuzzy: false,
-      searching: false,
-      candidates: [],
-      error: null,
-      discovering: false,
-      discovered: null,
-      discoverError: null,
-    })
-    face.cancelPick()
-    expect(panel.getSnapshot().picker).toBeNull()
-    expect(writes).toEqual([])
+    const row = rowOf(seat)
+    seat.panel.inject().saveRoute('llm-pi-ai/acme', [edited(row, { contextWindow: '2048' })])
+    await settle()
+    expect(seat.writes).toEqual([
+      { op: 'set', path: ['providers', 'acme', 'models', '0', 'contextWindow'], value: 2048 },
+    ])
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'applied' })
   })
 
-  it('opens no dialog for an adapter preset route, or for a route it never read', async () => {
-    const seat = bench({
-      directory: [{ provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek-api-key', settingsPath: [] }],
-      described: described([view('llm-deepseek-api-key', { models: [{ id: 'deepseek-v4-pro', contextWindow: 1000000 }] })]),
-      matches: [matchFor('deepseek-official', 'deepseek-v4-pro', { contextWindow: 131072 })],
-    })
-    seat.panel.inject().ensure()
+  it('writes nothing for a card whose staged values match what is stored', async () => {
+    const seat = readyBench()
     await settle()
-    seat.panel.inject().pickModel('llm-deepseek-api-key/deepseek-official', null)
-    expect(seat.panel.getSnapshot().picker).toBeNull()
-    seat.panel.inject().pickModel('llm-pi-ai/never-read', null)
-    expect(seat.panel.getSnapshot().picker).toBeNull()
-  })
-
-  it('reports a read-only deployment instead of opening a dialog that cannot be written', async () => {
-    const { panel } = addBench({ described: described(
-      [view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1', input: ['text'] }] } } })],
-      false,
-    ) })
-    panel.inject().ensure()
+    seat.panel.inject().saveRoute('llm-pi-ai/acme', [edited(rowOf(seat))])
     await settle()
-    panel.inject().pickModel('llm-pi-ai/acme', null)
-    expect(panel.getSnapshot()).toMatchObject({ picker: null, notice: { kind: 'readonly' } })
-  })
-
-  it('asks the catalog about the route the dialog was opened for', async () => {
-    const { panel, searches } = addBench({ candidates: [candidate('acme', 'acme-2')] })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-2', false)
-    await settle()
-    expect(searches).toEqual([{ provider: 'acme', modelId: 'acme-2' }])
-    expect(panel.getSnapshot().picker).toEqual({
-      routeKey: 'llm-pi-ai/acme',
-      modelKey: null,
-      modelId: 'acme-2',
-      fuzzy: false,
-      searching: false,
-      candidates: [candidate('acme', 'acme-2')],
-      error: null,
-      discovering: false,
-      discovered: null,
-      discoverError: null,
-    })
-  })
-
-  it('ignores a search while no picker is open', async () => {
-    const { panel, searches } = addBench()
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.searchModel('acme-2', false)
-    face.searchModel('acme-2', true)
-    await settle()
-    expect(searches).toEqual([])
-  })
-
-  it('clears the candidates without searching when the id is emptied', async () => {
-    const { panel, searches } = addBench({ candidates: [candidate('acme', 'acme-2')] })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-2', false)
-    await settle()
-    face.searchModel('   ', false)
-    await settle()
-    expect(searches).toHaveLength(1)
-    expect(panel.getSnapshot().picker).toMatchObject({ candidates: [], searching: false, error: null })
-  })
-
-  it('publishes only the newest of two overlapping searches', async () => {
-    const { panel, script } = addBench({ candidates: [candidate('acme', 'acme-2')] })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-', false)
-    face.searchModel('acme-2', false)
-    await settle()
-    expect(panel.getSnapshot().picker).toMatchObject({ modelId: 'acme-2', searching: false })
-    expect(script.candidates).toHaveLength(1)
-  })
-
-  it('reports a failed search without disturbing the dialog', async () => {
-    const { panel } = addBench({ candidatesFailure: new ModelsDevError('the server answered HTTP 503', CATALOG.source) })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-2', false)
-    await settle()
-    expect(panel.getSnapshot().picker).toMatchObject({ candidates: [], searching: false, error: 'the server answered HTTP 503' })
-  })
-
-  it('appends the entry at the first free index and closes the dialog', async () => {
-    const { panel, writes } = addBench()
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.addModel(DRAFT, undefined)
-    await settle()
-    expect(writes).toEqual([{
-      op: 'set',
-      path: ['providers', 'acme', 'models', '1'],
-      value: { id: 'acme-2', name: 'Acme 2', contextWindow: 200000, maxTokens: 8192, input: ['text', 'image'] },
-    }])
-    expect(panel.getSnapshot().picker).toBeNull()
-    expect(panel.getSnapshot().notice).toEqual({ kind: 'added', id: 'acme-2' })
-    expect(panel.getSnapshot().writing).toEqual([])
-  })
-
-  it('files the entry the new model was filled from as what it follows', async () => {
-    const { panel } = addBench()
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.addModel(DRAFT, { providerId: 'deepseek', modelId: 'deepseek/deepseek-v4-flash-0731' })
-    await settle()
-    // The id the catalog cannot reach is exactly the one a binding is for: the
-    // row is compared against the entry its values came from rather than
-    // reporting that the catalog has nothing for it.
-    expect(readBindings(bindingHost()).get(bindingKey('llm-pi-ai/acme', 'acme-2')))
-      .toEqual({ providerId: 'deepseek', modelId: 'deepseek/deepseek-v4-flash-0731' })
-  })
-
-  it('files no entry for a model the catalog answered nothing for', async () => {
-    const { panel } = addBench()
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.addModel(DRAFT, undefined)
-    await settle()
-    expect(readBindings(bindingHost()).has(bindingKey('llm-pi-ai/acme', 'acme-2'))).toBe(false)
-  })
-
-  it('closes the dialog even though its own write makes the Host invalidate the panel', async () => {
-    const seat = addBench()
-    seat.panel.inject().ensure()
-    await settle()
-    // Writing a namespace makes the Host broadcast `settings/document-updated`,
-    // which starts a re-read underneath the settlement that has to close it.
-    seat.script.broadcast = () => { seat.panel.invalidate() }
-    seat.panel.inject().pickModel('llm-pi-ai/acme', null)
-    seat.panel.inject().addModel(DRAFT, undefined)
-    await settle()
-    expect(seat.panel.getSnapshot().picker).toBeNull()
-    expect(seat.panel.getSnapshot().writing).toEqual([])
-  })
-
-  it('keeps the dialog open and says so when the namespace refuses the entry', async () => {
-    const seat = addBench()
-    seat.panel.inject().ensure()
-    await settle()
-    seat.script.mutate = () => ({
-      ok: false,
-      error: new RemoteError('settings/rejected', 'model ids must be unique', { ns: 'llm-pi-ai' }),
-    })
-    seat.panel.inject().pickModel('llm-pi-ai/acme', null)
-    seat.panel.inject().addModel(DRAFT, undefined)
-    await settle()
-    expect(seat.panel.getSnapshot().picker).not.toBeNull()
-    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'model ids must be unique' })
-  })
-
-  it('reports a stale revision as a conflict and keeps the dialog open', async () => {
-    const seat = addBench()
-    seat.panel.inject().ensure()
-    await settle()
-    seat.script.mutate = () => ({
-      ok: false,
-      error: new RemoteError('settings/conflict', 'the namespace moved', { ns: 'llm-pi-ai', expected: 7, actual: 8 }),
-    })
-    seat.panel.inject().pickModel('llm-pi-ai/acme', null)
-    seat.panel.inject().addModel(DRAFT, undefined)
-    await settle()
-    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'conflict' })
-    expect(seat.panel.getSnapshot().picker).not.toBeNull()
-  })
-
-  it('writes no draft the route would refuse, whichever action names it', async () => {
-    const seat = addBench()
-    const face = seat.panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    for (const draft of [
-      { ...DRAFT, id: '   ' },
-      { ...DRAFT, id: 'acme-1' },
-      { ...DRAFT, contextWindow: 0 },
-      { ...DRAFT, maxTokens: -8 },
-    ]) {
-      face.addModel(draft, undefined)
-      await settle()
-    }
     expect(seat.writes).toEqual([])
-    // The dialog is still open, so the reader can fix the draft rather than
-    // start again from an empty id.
-    expect(seat.panel.getSnapshot().picker).not.toBeNull()
+    expect(seat.panel.getSnapshot().status).toBe('ready')
   })
 
-  it('writes nothing into a preset route, or a route the panel never read', async () => {
+  it('hands a cleared field back to the adapter', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().saveRoute('llm-pi-ai/acme', [edited(rowOf(seat), { contextWindow: '' })])
+    await settle()
+    expect(seat.writes).toEqual([
+      { op: 'unset', path: ['providers', 'acme', 'models', '0', 'contextWindow'] },
+    ])
+  })
+
+  it('refiles the entry a renamed model followed under its new id', async () => {
+    const host = bindingHost()
+    const seat = readyBench()
+    await settle()
+    const routeKey = 'llm-pi-ai/acme'
+    writeBinding(host, bindingKey(routeKey, 'acme-1'), { providerId: 'acme', modelId: 'acme-1' })
+    seat.panel.inject().saveRoute(routeKey, [edited(rowOf(seat), { id: 'acme-renamed' })])
+    await settle()
+    expect(seat.writes).toEqual([
+      { op: 'set', path: ['providers', 'acme', 'models', '0', 'id'], value: 'acme-renamed' },
+    ])
+    expect(readBindings(host).get(bindingKey(routeKey, 'acme-1'))).toBeUndefined()
+    expect(readBindings(host).get(bindingKey(routeKey, 'acme-renamed'))).toEqual({ providerId: 'acme', modelId: 'acme-1' })
+    writeBinding(host, bindingKey(routeKey, 'acme-renamed'), undefined)
+  })
+
+  it('writes nothing and says so when a staged value breaks the route rule', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().saveRoute('llm-pi-ai/acme', [edited(rowOf(seat), { contextWindow: '0' })])
+    await settle()
+    expect(seat.writes).toEqual([])
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'invalid', problem: 'invalid-context' })
+  })
+
+  it('does not let an untouched row block the rows that did change', async () => {
+    const seat = bench({
+      directory: [entry()],
+      described: described([view('llm-pi-ai', {
+        providers: { acme: { models: [{ id: 'a', input: ['text'] }, { id: 'b', contextWindow: 0, input: ['text'] }] },
+        },
+      })]),
+      matches: [matchFor('acme', 'a', { contextWindow: 1024 }), matchFor('acme', 'b', { contextWindow: 2048 })],
+    })
+    seat.panel.inject().ensure()
+    await settle()
+    const first = rowOf(seat, 'llm-pi-ai/acme', 0)
+    const second = rowOf(seat, 'llm-pi-ai/acme', 1)
+    seat.panel.inject().saveRoute('llm-pi-ai/acme', [edited(first, { contextWindow: '512' }), edited(second)])
+    await settle()
+    expect(seat.writes).toEqual([
+      { op: 'set', path: ['providers', 'acme', 'models', '0', 'contextWindow'], value: 512 },
+    ])
+  })
+
+  it('refuses a read-only deployment, a preset route, and a route it never read', async () => {
+    const readOnly = readyBench(false)
+    await settle()
+    readOnly.panel.inject().saveRoute('llm-pi-ai/acme', [edited(rowOf(readOnly), { name: 'x' })])
+    await settle()
+    expect(readOnly.writes).toEqual([])
+    expect(readOnly.panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
+
     const preset = bench({
-      directory: [{ provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek-api-key', settingsPath: [] }],
-      described: described([view('llm-deepseek-api-key', { models: [{ id: 'deepseek-v4-pro', contextWindow: 1000000 }] })]),
-      matches: [matchFor('deepseek-official', 'deepseek-v4-pro', { contextWindow: 131072 })],
+      directory: [entry({ declared: false })],
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1' }] } } })]),
+      matches: [matchFor('acme', 'acme-1')],
     })
     preset.panel.inject().ensure()
     await settle()
-    preset.panel.inject().addModel(DRAFT, undefined)
-    preset.panel.inject().addModel(DRAFT, undefined)
+    preset.panel.inject().saveRoute('llm-pi-ai/acme', [edited(rowOf(preset), { name: 'x' })])
+    preset.panel.inject().saveRoute('llm-pi-ai/missing', [])
     await settle()
     expect(preset.writes).toEqual([])
   })
 
-  it('leaves the published state frozen once the controller has been unloaded', async () => {
-    const seat = addBench()
-    const face = seat.panel.inject()
-    face.ensure()
+  it('keeps the refusal when the namespace rejects the write', async () => {
+    const seat = readyBench()
     await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.addModel(DRAFT, undefined)
-    seat.panel.dispose()
-    const frozen = seat.panel.getSnapshot()
+    seat.script.mutate = () => ({ ok: false, error: new RemoteError('settings/refused', 'nope', {}) })
+    seat.panel.inject().saveRoute('llm-pi-ai/acme', [edited(rowOf(seat), { contextWindow: '2048' })])
     await settle()
-    // The write went out, and a panel nobody will read again publishes nothing:
-    // the lock it took is never released, because nothing will render it.
-    expect(seat.writes).toHaveLength(1)
-    expect(seat.panel.getSnapshot()).toBe(frozen)
-    expect(frozen).toMatchObject({ notice: null, writing: ['llm-pi-ai'] })
-    // The dialog is frozen open too: the settlement that would close it is the
-    // one this panel is no longer there to apply.
-    expect(frozen.picker?.routeKey).toBe('llm-pi-ai/acme')
-  })
-
-  it('publishes the close entries a fuzzy search answered with', async () => {
-    const similar = [
-      { providerId: 'acme', similarity: 'near' as const, distance: 1, model: candidate('acme', 'acme-2').model },
-      { providerId: 'other', similarity: 'contains' as const, model: candidate('other', 'acme-2-pro').model },
-    ]
-    const { panel, searches } = addBench({ similar })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-2', true)
-    await settle()
-    expect(searches).toEqual([{ provider: 'acme', modelId: 'acme-2' }])
-    expect(panel.getSnapshot().picker).toMatchObject({ fuzzy: true, searching: false, candidates: similar })
-  })
-
-  it('goes back to the exact search as soon as the id is typed again', async () => {
-    const { panel } = addBench({ candidates: [candidate('acme', 'acme-2')], similar: [] })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-2', true)
-    await settle()
-    expect(panel.getSnapshot().picker?.fuzzy).toBe(true)
-    face.searchModel('acme-2', false)
-    await settle()
-    expect(panel.getSnapshot().picker).toMatchObject({ fuzzy: false, candidates: [candidate('acme', 'acme-2')] })
-  })
-
-  it('publishes only the newest of an exact search and a fuzzy one', async () => {
-    const { panel } = addBench({ similar: [{ providerId: 'acme', similarity: 'near' as const, distance: 1, model: candidate('acme', 'acme-2').model }] })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-2', true)
-    face.searchModel('acme-2', false)
-    await settle()
-    expect(panel.getSnapshot().picker).toMatchObject({ fuzzy: false, searching: false })
-  })
-
-  it('reports a failed fuzzy search without disturbing the dialog', async () => {
-    const { panel } = addBench({ candidatesFailure: new ModelsDevError('the server answered HTTP 503', CATALOG.source) })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.searchModel('acme-2', true)
-    await settle()
-    expect(panel.getSnapshot().picker).toMatchObject({ fuzzy: true, candidates: [], error: 'the server answered HTTP 503' })
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'nope' })
+    expect(seat.panel.getSnapshot().writing).toEqual([])
   })
 })
 
-describe('panel controller asks the route which models its endpoint serves', () => {
-  /** One route whose profile declares the endpoint it is reached at. */
-  function endpointBench(script: Partial<Script> = {}): Bench {
-    return bench({
-      directory: [entry()],
-      described: described([view('llm-pi-ai', {
-        providers: {
-          acme: {
-            api: 'openai-responses',
-            baseURL: 'http://127.0.0.1:5090/v1',
-            models: [{ id: 'acme-1', input: ['text'] }],
-          },
-        },
-      })]),
-      ...script,
+describe('panel controller adds a model', () => {
+  it('opens the dialog for a route, and closes it again without writing', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    expect(seat.panel.getSnapshot().editor).toMatchObject({ mode: 'add', routeKey: 'llm-pi-ai/acme', modelKey: null, modelId: '' })
+    seat.panel.inject().cancelEditor()
+    expect(seat.panel.getSnapshot().editor).toBeNull()
+    expect(seat.writes).toEqual([])
+  })
+
+  it('opens no dialog for an adapter preset route, or for a route it never read', async () => {
+    const preset = bench({
+      directory: [entry({ declared: false })],
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1' }] } } })]),
+      matches: [matchFor('acme', 'acme-1')],
     })
-  }
-
-  /** One model an endpoint reported about itself. */
-  function served(id: string, extra: Partial<LlmDiscoveredModel> = {}): LlmDiscoveredModel {
-    return { id, name: id, ...extra }
-  }
-
-  it('hands the route its own namespace and endpoint facts, and publishes what it answered', async () => {
-    // The interrogation happens on the Host, which holds the route's credential
-    // and can reach an address the browser cannot; the panel's whole part in it
-    // is naming the route and publishing the ids it got back.
-    const { panel, interrogations } = endpointBench({ discovered: [served('acme-2'), served('acme-3', { name: 'Acme Three' })] })
-    const face = panel.inject()
-    face.ensure()
+    preset.panel.inject().ensure()
     await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.discoverModels()
+    preset.panel.inject().openAdd('llm-pi-ai/acme')
+    preset.panel.inject().openAdd('llm-pi-ai/missing')
+    expect(preset.panel.getSnapshot().editor).toBeNull()
+  })
+
+  it('reports a read-only deployment instead of opening a dialog that cannot be written', async () => {
+    const seat = readyBench(false)
     await settle()
-    expect(interrogations).toEqual([{
-      settingsNs: 'llm-pi-ai',
-      request: { provider: 'acme', baseURL: 'http://127.0.0.1:5090/v1', api: 'openai-responses' },
-    }])
-    expect(panel.getSnapshot().picker).toMatchObject({
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    expect(seat.panel.getSnapshot().editor).toBeNull()
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
+  })
+
+  it('asks the catalog about the route the dialog was opened for', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().searchModel('acme-9', false)
+    await settle()
+    expect(seat.searches).toEqual([{ provider: 'acme', modelId: 'acme-9' }])
+    expect(seat.panel.getSnapshot().editor).toMatchObject({ modelId: 'acme-9', candidates: [] })
+  })
+
+  it('clears the candidates without searching when the id is emptied', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().searchModel('acme-9', false)
+    await settle()
+    seat.panel.inject().searchModel('', false)
+    await settle()
+    expect(seat.searches).toHaveLength(1)
+    expect(seat.panel.getSnapshot().editor).toMatchObject({ modelId: '', candidates: [], searching: false })
+  })
+
+  it('publishes only the newest of two overlapping searches', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.script.candidates = [{
+      providerId: 'acme',
+      model: { providerId: 'acme', id: 'acme-9', name: 'Nine', inputModalities: ['text'], reasoning: false, toolCall: true, structuredOutput: false, temperature: true },
+      strategy: 'exact',
+    }]
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().searchModel('acme-9', false)
+    seat.panel.inject().searchModel('acme-10', false)
+    await settle()
+    expect(seat.panel.getSnapshot().editor).toMatchObject({ modelId: 'acme-10', searching: false })
+  })
+
+  it('publishes the entries a fuzzy search answered with', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.script.similar = [{
+      providerId: 'acme',
+      model: { providerId: 'acme', id: 'acme-9', name: 'Nine', inputModalities: ['text'], reasoning: false, toolCall: true, structuredOutput: false, temperature: true },
+      similarity: 'near',
+      distance: 1,
+    }]
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().searchModel('acme-90', true)
+    await settle()
+    expect(seat.panel.getSnapshot().editor).toMatchObject({ fuzzy: true, candidates: [{ similarity: 'near', distance: 1 }] })
+  })
+
+  it('reports a failed search without disturbing the dialog', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.script.candidatesFailure = new Error('offline')
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().searchModel('acme-9', false)
+    await settle()
+    expect(seat.panel.getSnapshot().editor).toMatchObject({ searching: false, candidates: [], error: 'offline' })
+  })
+
+  it('appends the entry at the first free array index and closes the dialog', async () => {
+    const seat = readyBench()
+    await settle()
+    const entryValues: NewModelEntry = { id: 'acme-2', contextWindow: 4096, inputModalities: ['text'], modalityField: 'input' }
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().addModel(entryValues, undefined)
+    await settle()
+    expect(seat.writes).toEqual([
+      {
+        op: 'set',
+        path: ['providers', 'acme', 'models', '1'],
+        value: { id: 'acme-2', contextWindow: 4096, input: ['text'] },
+      },
+    ])
+    expect(seat.panel.getSnapshot()).toMatchObject({ editor: null, notice: { kind: 'added', id: 'acme-2' } })
+  })
+
+  it('files the entry the new model was filled from as what it follows', async () => {
+    const host = bindingHost()
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().addModel(
+      { id: 'acme-2', inputModalities: ['text'], modalityField: 'input' },
+      { providerId: 'acme', modelId: 'acme-2' },
+    )
+    await settle()
+    expect(readBindings(host).get(bindingKey('llm-pi-ai/acme', 'acme-2'))).toEqual({ providerId: 'acme', modelId: 'acme-2' })
+    writeBinding(host, bindingKey('llm-pi-ai/acme', 'acme-2'), undefined)
+  })
+
+  it('writes no draft the route would refuse', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    // The route already configures acme-1, and a duplicate id is one no adapter
+    // accepts, so nothing reaches the namespace.
+    seat.panel.inject().addModel({ id: 'acme-1', inputModalities: ['text'], modalityField: 'input' }, undefined)
+    await settle()
+    expect(seat.writes).toEqual([])
+    expect(seat.panel.getSnapshot().editor?.mode).toBe('add')
+  })
+
+  it('keeps the dialog open and says so when the namespace refuses the entry', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.script.mutate = () => ({ ok: false, error: new RemoteError('settings/refused', 'nope', {}) })
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().addModel({ id: 'acme-2', inputModalities: ['text'], modalityField: 'input' }, undefined)
+    await settle()
+    expect(seat.panel.getSnapshot().editor?.mode).toBe('add')
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'nope' })
+  })
+
+  it('asks the route which models its endpoint serves, and publishes the answer', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.script.discovered = [{ id: 'acme-3', name: 'Three', contextWindow: 4096 }]
+    seat.panel.inject().openAdd('llm-pi-ai/acme')
+    seat.panel.inject().discoverModels()
+    await settle()
+    expect(seat.interrogations).toEqual([
+      { settingsNs: 'llm-pi-ai', request: { provider: 'acme' } },
+    ])
+    expect(seat.panel.getSnapshot().editor).toMatchObject({
       discovering: false,
-      discovered: [served('acme-2'), served('acme-3', { name: 'Acme Three' })],
+      discovered: [{ id: 'acme-3' }],
       discoverError: null,
     })
   })
 
-  it('names only the route when its profile declares no endpoint of its own', async () => {
-    const { panel, interrogations } = addBench({ discovered: [served('acme-2')] })
-    const face = panel.inject()
-    face.ensure()
+  it('reports an interrogation the host refused, and one that rejected', async () => {
+    const refused = readyBench()
     await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.discoverModels()
+    refused.script.discoveryRefusal = new RemoteError('llm/unsupported', 'no listing', {})
+    refused.panel.inject().openAdd('llm-pi-ai/acme')
+    refused.panel.inject().discoverModels()
     await settle()
-    expect(interrogations[0]?.request).toEqual({ provider: 'acme' })
+    expect(refused.panel.getSnapshot().editor).toMatchObject({ discovering: false, discovered: null, discoverError: 'no listing' })
+
+    const rejected = readyBench()
+    await settle()
+    rejected.script.discoveryFailure = new Error('socket gone')
+    rejected.panel.inject().openAdd('llm-pi-ai/acme')
+    rejected.panel.inject().discoverModels()
+    await settle()
+    expect(rejected.panel.getSnapshot().editor).toMatchObject({ discovering: false, discovered: null, discoverError: 'socket gone' })
   })
 
-  it('reports an interrogation the host refused without disturbing anything else', async () => {
-    const { panel } = endpointBench({ discoveryRefusal: new RemoteError('llm/model-discovery-rejected', 'could not reach http://127.0.0.1:5090/v1/models', {}) })
-    const face = panel.inject()
-    face.ensure()
+  it('asks nothing while no dialog is open', async () => {
+    const seat = readyBench()
     await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.discoverModels()
+    seat.panel.inject().discoverModels()
     await settle()
-    expect(panel.getSnapshot().picker).toMatchObject({
-      discovering: false,
-      discovered: null,
-      discoverError: 'could not reach http://127.0.0.1:5090/v1/models',
-    })
-  })
-
-  it('reports a rejected interrogation with the message it carries', async () => {
-    const { panel } = endpointBench({ discoveryFailure: new Error('the transport closed') })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.discoverModels()
-    await settle()
-    expect(panel.getSnapshot().picker).toMatchObject({ discovering: false, discovered: null, discoverError: 'the transport closed' })
-  })
-
-  it('publishes only the newest of two overlapping interrogations', async () => {
-    const { panel, script, interrogations } = endpointBench()
-    script.discoveryQueue = [[served('acme-2')], [served('acme-9')]]
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.discoverModels()
-    face.discoverModels()
-    await settle()
-    expect(interrogations).toHaveLength(2)
-    expect(panel.getSnapshot().picker).toMatchObject({ discovering: false, discovered: [served('acme-9')] })
-  })
-
-  it('asks nothing while no dialog is open, and lands nothing in one that was closed', async () => {
-    const { panel, interrogations } = endpointBench({ discovered: [served('acme-2')] })
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.discoverModels()
-    expect(interrogations).toEqual([])
-    face.pickModel('llm-pi-ai/acme', null)
-    face.discoverModels()
-    face.cancelPick()
-    await settle()
-    // The answer arrives after the dialog it belonged to is gone, so it is
-    // dropped rather than reopening anything or publishing into nothing.
-    expect(interrogations).toHaveLength(1)
-    expect(panel.getSnapshot().picker).toBeNull()
+    expect(seat.interrogations).toEqual([])
   })
 })
 
-describe('panel controller edits a model', () => {
-  /** One route holding the model an edit case acts on. */
-  function editBench(script: Partial<Script> = {}): Bench {
-    return bench({
-      directory: [entry()],
-      described: described([view('llm-pi-ai', {
-        providers: { acme: { models: [{ id: 'acme-1', name: 'Acme 1', contextWindow: 131072, maxTokens: 4096, input: ['text'] }] } },
-      })]),
-      matches: [matchFor('acme', 'acme-1', { contextWindow: 1048576, maxOutputTokens: 8192, inputModalities: ['text', 'image'] })],
-      ...script,
+describe('panel controller pins the entry a model follows', () => {
+  it('opens on the model it was asked about, and files the chosen entry', async () => {
+    const host = bindingHost()
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().openEntry('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    expect(seat.panel.getSnapshot().editor).toMatchObject({
+      mode: 'entry',
+      routeKey: 'llm-pi-ai/acme',
+      modelKey: 'llm-pi-ai/acme/0',
+      modelId: 'acme-1',
     })
-  }
-
-  it('opens on one model of a route and refuses a model of another', async () => {
-    const { panel } = editBench()
-    const face = panel.inject()
-    face.ensure()
+    seat.panel.inject().bindEntry({ providerId: 'acme', modelId: 'acme-1' })
     await settle()
-    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    expect(panel.getSnapshot().picker).toMatchObject({ routeKey: 'llm-pi-ai/acme', modelKey: 'llm-pi-ai/acme/0' })
-    face.cancelPick()
-    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/7')
-    expect(panel.getSnapshot().picker).toBeNull()
+    expect(readBindings(host).get(bindingKey('llm-pi-ai/acme', 'acme-1'))).toEqual({ providerId: 'acme', modelId: 'acme-1' })
+    expect(seat.panel.getSnapshot()).toMatchObject({ editor: null, notice: { kind: 'bound' } })
+    writeBinding(host, bindingKey('llm-pi-ai/acme', 'acme-1'), undefined)
   })
 
-  it('writes the edited fields back under the model it opened on', async () => {
-    const { panel, writes } = editBench()
-    const face = panel.inject()
-    face.ensure()
+  it('returns the model to the automatic match when the choice is cleared', async () => {
+    const host = bindingHost()
+    const seat = readyBench()
     await settle()
-    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    // A field the edit does not carry has been cleared, so it goes back to the
-    // adapter; that is the one value an editor can express that adopting cannot.
-    face.saveModel({ name: 'Acme One', contextWindow: 200000, inputModalities: ['text'] }, undefined)
+    writeBinding(host, bindingKey('llm-pi-ai/acme', 'acme-1'), { providerId: 'acme', modelId: 'acme-1' })
+    seat.panel.inject().openEntry('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    seat.panel.inject().bindEntry(null)
     await settle()
-    expect(writes).toEqual([
-      { op: 'set', path: ['providers', 'acme', 'models', '0', 'name'], value: 'Acme One' },
-      { op: 'set', path: ['providers', 'acme', 'models', '0', 'contextWindow'], value: 200000 },
-      { op: 'unset', path: ['providers', 'acme', 'models', '0', 'maxTokens'] },
-    ])
-    expect(panel.getSnapshot()).toMatchObject({ picker: null, notice: { kind: 'saved' } })
+    expect(readBindings(host).get(bindingKey('llm-pi-ai/acme', 'acme-1'))).toBeUndefined()
   })
 
-  it('hands a cleared field back to the adapter', async () => {
-    const { panel, writes } = editBench()
-    const face = panel.inject()
-    face.ensure()
+  it('re-reads the comparison with the entry that was pinned', async () => {
+    const host = bindingHost()
+    const seat = readyBench()
     await settle()
-    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    face.saveModel({ name: 'Acme 1', inputModalities: ['text'] }, undefined)
+    seat.panel.inject().openEntry('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    seat.panel.inject().bindEntry({ providerId: 'acme', modelId: 'acme-1' })
     await settle()
-    expect(writes).toEqual([
-      { op: 'unset', path: ['providers', 'acme', 'models', '0', 'contextWindow'] },
-      { op: 'unset', path: ['providers', 'acme', 'models', '0', 'maxTokens'] },
-    ])
+    expect(rowOf(seat).match.strategy).toBe('bound')
+    writeBinding(host, bindingKey('llm-pi-ai/acme', 'acme-1'), undefined)
   })
 
-  it('writes nothing when the edit changed no field, and still closes', async () => {
-    const { panel, writes } = editBench()
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    face.saveModel({ name: 'Acme 1', contextWindow: 131072, maxTokens: 4096, inputModalities: ['text'] }, undefined)
-    await settle()
-    expect(writes).toEqual([])
-    expect(panel.getSnapshot().picker).toBeNull()
-  })
-
-  it('keeps the editor open and says so when the namespace refuses the edit', async () => {
-    const seat = editBench()
-    seat.panel.inject().ensure()
-    await settle()
-    seat.script.mutate = () => ({
-      ok: false,
-      error: new RemoteError('settings/rejected', 'contextWindow must be a positive integer', { ns: 'llm-pi-ai' }),
+  it('refuses a preset route, a model it never read, and a read-only deployment', async () => {
+    const preset = bench({
+      directory: [entry({ declared: false })],
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1' }] } } })]),
+      matches: [matchFor('acme', 'acme-1')],
     })
-    seat.panel.inject().pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    seat.panel.inject().saveModel({ name: '', inputModalities: ['text'] }, undefined)
+    preset.panel.inject().ensure()
     await settle()
-    expect(seat.panel.getSnapshot().picker).not.toBeNull()
-    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'contextWindow must be a positive integer' })
-  })
+    preset.panel.inject().openEntry('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    preset.panel.inject().openEntry('llm-pi-ai/acme', 'llm-pi-ai/acme/9')
+    expect(preset.panel.getSnapshot().editor).toBeNull()
 
-  it('writes nothing into a model the panel never read', async () => {
-    const seat = editBench()
-    const face = seat.panel.inject()
-    face.ensure()
+    const readOnly = readyBench(false)
     await settle()
-    face.pickModel('llm-pi-ai/acme', null)
-    face.saveModel(DRAFT, undefined)
-    await settle()
-    expect(seat.writes).toEqual([])
-  })
-
-  it('refuses a read-only deployment instead of opening the editor', async () => {
-    const seat = editBench({ described: described(
-      [view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1', input: ['text'] }] } } })],
-      false,
-    ) })
-    seat.panel.inject().ensure()
-    await settle()
-    seat.panel.inject().pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    expect(seat.panel.getSnapshot()).toMatchObject({ picker: null, notice: { kind: 'readonly' } })
-  })
-
-  it('answers a read with the entry a previous edit pinned for a model', async () => {
-    const seat = editBench()
-    seat.panel.inject().ensure()
-    await settle()
-    seat.panel.inject().pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    seat.panel.inject().saveModel({ name: 'Acme 1', contextWindow: 131072, maxTokens: 4096, inputModalities: ['text'] },
-      { providerId: 'azure', modelId: 'acme-1' })
-    await settle()
-    // The edit changed no field, so nothing reached the namespace; the pinning is
-    // what the read after it picks up, and the row then follows that entry.
-    expect(seat.writes).toEqual([])
-    expect(seat.panel.getSnapshot().routes[0]?.models[0]?.match).toMatchObject({
-      strategy: 'bound',
-      providerKey: 'azure',
-    })
-  })
-
-  it('does not append through the edit action, nor edit through the add one', async () => {
-    const seat = editBench()
-    const face = seat.panel.inject()
-    face.ensure()
-    await settle()
-    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    // Appending while an edit is open is not what the reader asked for.
-    face.addModel(DRAFT, undefined)
-    await settle()
-    expect(seat.writes).toEqual([])
-    face.saveModel({ name: 'Acme One', contextWindow: 131072, maxTokens: 4096, inputModalities: ['text'] }, undefined)
-    await settle()
-    expect(seat.writes).toEqual([{ op: 'set', path: ['providers', 'acme', 'models', '0', 'name'], value: 'Acme One' }])
-    // Editing while an add is open is the mirror of that.
-    face.pickModel('llm-pi-ai/acme', null)
-    face.saveModel({ name: '', inputModalities: ['text'] }, undefined)
-    await settle()
-    expect(seat.writes).toHaveLength(1)
+    readOnly.panel.inject().openEntry('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    expect(readOnly.panel.getSnapshot().editor).toBeNull()
+    expect(readOnly.panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
   })
 })
 
 describe('panel controller removes a model', () => {
-  /** One route holding two models, so an index shift is observable. */
-  function removeBench(script: Partial<Script> = {}): Bench {
-    return bench({
-      directory: [entry()],
-      described: described([view('llm-pi-ai', {
-        providers: { acme: { models: [{ id: 'acme-1', input: ['text'] }, { id: 'acme-2', input: ['text'] }] } },
-      })]),
-      matches: [matchFor('acme', 'acme-1'), matchFor('acme', 'acme-2')],
-      ...script,
-    })
-  }
-
   it('unsets the index the model holds', async () => {
-    const { panel, writes } = removeBench()
-    const face = panel.inject()
-    face.ensure()
+    const seat = readyBench()
     await settle()
-    face.removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/1')
-    await settle()
-    expect(writes).toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '1'] }])
-    expect(panel.getSnapshot()).toMatchObject({ notice: { kind: 'removed', id: 'acme-2' } })
-    expect(panel.getSnapshot().writing).toEqual([])
-  })
-
-  it('removes the first model by its own index, not by the row order it reads back', async () => {
-    const { panel, writes } = removeBench()
-    const face = panel.inject()
-    face.ensure()
-    await settle()
-    face.removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    await settle()
-    expect(writes).toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '0'] }])
-  })
-
-  it('keeps the editor open on nothing and says so when the namespace refuses', async () => {
-    const seat = removeBench()
-    seat.panel.inject().ensure()
-    await settle()
-    seat.script.mutate = () => ({
-      ok: false,
-      error: new RemoteError('settings/rejected', 'the profile rejects this section', { ns: 'llm-pi-ai' }),
-    })
     seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
     await settle()
-    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'refused', message: 'the profile rejects this section' })
-  })
-
-  it('reports a stale revision as a conflict rather than removing the wrong entry', async () => {
-    const seat = removeBench()
-    seat.panel.inject().ensure()
-    await settle()
-    seat.script.mutate = () => ({
-      ok: false,
-      error: new RemoteError('settings/conflict', 'the namespace moved', { ns: 'llm-pi-ai', expected: 1, actual: 2 }),
-    })
-    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/1')
-    await settle()
-    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'conflict' })
-  })
-
-  it('removes nothing from a preset route, a model it never read, or a read-only one', async () => {
-    const preset = bench({
-      directory: [{ provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek-api-key', settingsPath: [] }],
-      described: described([view('llm-deepseek-api-key', { models: [{ id: 'deepseek-v4-pro', contextWindow: 1000000 }] })]),
-      matches: [matchFor('deepseek-official', 'deepseek-v4-pro', { contextWindow: 131072 })],
-    })
-    preset.panel.inject().ensure()
-    await settle()
-    preset.panel.inject().removeModel('llm-deepseek-api-key/deepseek-official', 'llm-deepseek-api-key/deepseek-official/0')
-    await settle()
-    expect(preset.writes).toEqual([])
-
-    const readonly = removeBench({ described: described(
-      [view('llm-pi-ai', { providers: { acme: { models: [{ id: 'acme-1', input: ['text'] }] } } })],
-      false,
-    ) })
-    readonly.panel.inject().ensure()
-    await settle()
-    readonly.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    await settle()
-    expect(readonly.writes).toEqual([])
-    expect(readonly.panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
-
-    const seat = removeBench()
-    seat.panel.inject().ensure()
-    await settle()
-    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/9')
-    await settle()
-    expect(seat.writes).toEqual([])
+    expect(seat.writes).toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '0'] }])
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'removed', id: 'acme-1' })
   })
 
   it('takes the entry binding with the model it described', async () => {
-    const seat = removeBench()
-    const face = seat.panel.inject()
-    face.ensure()
+    const host = bindingHost()
+    const seat = readyBench()
     await settle()
-    face.pickModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
-    face.saveModel({ name: '', contextWindow: undefined, maxTokens: undefined, inputModalities: ['text'] },
-      { providerId: 'azure', modelId: 'acme-1' })
+    writeBinding(host, bindingKey('llm-pi-ai/acme', 'acme-1'), { providerId: 'acme', modelId: 'acme-1' })
+    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
     await settle()
-    expect(seat.panel.getSnapshot().routes[0]?.models[0]?.match.strategy).toBe('bound')
-    face.removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    expect(readBindings(host).get(bindingKey('llm-pi-ai/acme', 'acme-1'))).toBeUndefined()
+  })
+
+  it('removes the model the reader pressed, not the row order the panel read back', async () => {
+    const seat = bench({
+      directory: [entry()],
+      described: described([view('llm-pi-ai', { providers: { acme: { models: [{ id: 'first' }, { id: 'second' }] } } })]),
+      matches: [matchFor('acme', 'first'), matchFor('acme', 'second')],
+    })
+    seat.panel.inject().ensure()
     await settle()
-    // The read after the removal no longer has that model to follow, so a
-    // binding left behind would be hidden state for an id the route dropped.
-    expect(readBindings(bindingHost()).has(bindingKey('llm-pi-ai/acme', 'acme-1'))).toBe(false)
+    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/1')
+    await settle()
+    expect(seat.writes).toEqual([{ op: 'unset', path: ['providers', 'acme', 'models', '1'] }])
+  })
+
+  it('refuses a preset route, an unknown model, and a read-only deployment', async () => {
+    const seat = readyBench(false)
+    await settle()
+    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/0')
+    seat.panel.inject().removeModel('llm-pi-ai/acme', 'llm-pi-ai/acme/9')
+    await settle()
+    expect(seat.writes).toEqual([])
+    expect(seat.panel.getSnapshot().notice).toEqual({ kind: 'readonly' })
+  })
+})
+
+describe('panel controller reports a write in flight', () => {
+  it('holds the namespace in `writing` until the settlement lands', async () => {
+    const seat = readyBench()
+    await settle()
+    seat.panel.inject().adoptAll()
+    expect(seat.panel.getSnapshot().writing).toEqual(['llm-pi-ai'])
+    await settle()
+    expect(seat.panel.getSnapshot().writing).toEqual([])
   })
 })

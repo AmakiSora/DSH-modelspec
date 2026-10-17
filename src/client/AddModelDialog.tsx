@@ -19,28 +19,32 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { newModelProblem, newModelTemplate, type NewModelEntry, type NewModelProblem } from './add-model.ts'
-import { type ModelsDevLocaleKey } from './locales.ts'
+import { PROBLEM_KEYS } from './locales.ts'
+import type { ModelsDevModel, ModelsDevOption } from './types.ts'
+import { CandidateList, optionKey, type UpstreamProbe } from './CandidateList.tsx'
 import {
-  CandidatePicker, ModelFields, bindingOf, effortFields, effortsFromFields, fieldsFrom, optionKey, upstreamFields,
-  type PickerFields, type PickerTranslate, type UpstreamProbe,
-} from './ModelPicker.tsx'
+  CapacityField, ModalitiesField, ReasoningField, type Translate,
+} from './ModelFields.tsx'
+import {
+  MODALITIES, effortsOf, parseCapacity, reasoningDraft, type ModelDraft,
+} from './draft.ts'
 import type { EntryBinding } from './bindings.ts'
-import type { ModelPickerState, RouteView } from './store.ts'
-import css from './ModelsDevPage.module.css'
+import type { EditorState, RouteView } from './store.ts'
+import css from './ModelsDevPanel.module.css'
 
 /** Everything the dialog needs from the panel around it. */
 export interface AddModelDialogProps {
   /** Route the model is being added to. */
   readonly route: RouteView
   /** What the dialog is waiting on. */
-  readonly picker: ModelPickerState
+  readonly editor: EditorState
   /** The deployment accepts settings writes at all. */
   readonly writable: boolean
   /** That route's namespace has a write in flight. */
   readonly busy: boolean
   /** The panel's dictionary seat. */
-  readonly t: PickerTranslate
-  /** Search the catalog for one model id. */
+  readonly t: Translate
+  /** Search the catalog for one model id; `fuzzy` asks for ids that came close. */
   readonly onSearch: (modelId: string, fuzzy: boolean) => void
   /** Ask the route's own endpoint which models it serves. */
   readonly onDiscover: () => void
@@ -50,84 +54,109 @@ export interface AddModelDialogProps {
   readonly onClose: () => void
 }
 
-/** Which dictionary key names each reason a draft cannot be written. */
-const PROBLEM_KEYS = {
-  'empty-id': 'addProblemEmptyId',
-  'duplicate-id': 'addProblemDuplicate',
-  'invalid-context': 'addProblemContext',
-  'invalid-output': 'addProblemOutput',
-  'invalid-efforts': 'addProblemEfforts',
-} satisfies Record<NewModelProblem, ModelsDevLocaleKey>
+/** The entries the dialog's fields can be filled from, ranked. */
+type Fill = { readonly key: string; readonly fields: ModelDraft }
+
+/** The field values one published entry fills. */
+function fieldsFromEntry(entry: ModelsDevModel): ModelDraft {
+  return {
+    baseId: '',
+    id: '',
+    name: entry.name,
+    contextWindow: entry.contextWindow === undefined ? '' : String(entry.contextWindow),
+    maxTokens: entry.maxOutputTokens === undefined ? '' : String(entry.maxOutputTokens),
+    inputModalities: entry.inputModalities.length === 0 ? [...MODALITIES] : [...entry.inputModalities],
+    reasoning: reasoningDraft(entry.declaredEfforts),
+  }
+}
+
+/** The field values one endpoint listing fills. */
+function fieldsFromUpstream(model: LlmDiscoveredModel): ModelDraft {
+  return {
+    baseId: '',
+    id: '',
+    // A name that only repeats the id says nothing the id does not, and storing
+    // it would look like a decision the reader did not make.
+    name: model.name === undefined || model.name === model.id ? '' : model.name,
+    contextWindow: model.contextWindow === undefined ? '' : String(model.contextWindow),
+    maxTokens: model.maxTokens === undefined ? '' : String(model.maxTokens),
+    inputModalities: model.inputModalities?.length ? [...model.inputModalities] : [...MODALITIES].slice(0, 1),
+    reasoning: { mode: 'inherit', levels: [] },
+  }
+}
+
+/** The field values the route's own template fills. */
+function fieldsFromTemplate(template: ReturnType<typeof newModelTemplate>): ModelDraft {
+  return {
+    baseId: '',
+    id: '',
+    name: '',
+    contextWindow: template.contextWindow === undefined ? '' : String(template.contextWindow),
+    maxTokens: template.maxTokens === undefined ? '' : String(template.maxTokens),
+    inputModalities: template.inputModalities.length === 0 ? ['text'] : [...template.inputModalities],
+    reasoning: reasoningDraft(template.reasoningEfforts),
+  }
+}
 
 /**
  * Render the add-model dialog.
  *
- * Mounted only while a dialog is open, so the id, the chosen entry, and the
- * edited values all start empty. The fields follow the chosen entry until the
- * reader changes them: a manual edit is kept until a different entry is picked,
- * so an id that briefly matched two candidates does not erase what was typed.
+ * Mounted only while it is open, so the chosen entry and the edited values all
+ * start empty. The fields follow the chosen entry until the reader changes them:
+ * a manual edit is kept while the same source stays active, and choosing a
+ * different entry refills them.
  *
  * @param props - the route, the pending search, and the panel's callbacks.
  * @returns the dialog element.
  */
 export function AddModelDialog({
-  route, picker, writable, busy, t, onSearch, onDiscover, onSubmit, onClose,
+  route, editor, writable, busy, t, onSearch, onDiscover, onSubmit, onClose,
 }: AddModelDialogProps): ReactNode {
-  const [modelId, setModelId] = useState('')
-  const [chosen, setChosen] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<string | undefined>(undefined)
   const [upstream, setUpstream] = useState<LlmDiscoveredModel | null>(null)
-  const [fields, setFields] = useState<PickerFields>(() => ({
-    name: '', context: '', output: '', image: false, noReasoning: false,
-    efforts: Object.fromEntries(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map(level => [level, ''])) as PickerFields['efforts'],
-  }))
+  const [draft, setDraft] = useState<ModelDraft>(() => fieldsFromTemplate(newModelTemplate(route.route)))
+  const template = useMemo(() => newModelTemplate(route.route), [route.route])
+  const disabled = !writable || busy
 
-  const template = useMemo(() => newModelTemplate(route.route), [route])
   // The chosen entry, or the only one the catalog answered with: a lone match is
   // the answer, not a choice the reader has to make.
-  const active = picker.candidates.find(option => optionKey(option) === chosen)
-    ?? (picker.candidates.length === 1 ? picker.candidates[0] : undefined)
+  const active: ModelsDevOption | undefined = editor.candidates.find(option => optionKey(option) === chosen)
+    ?? (editor.candidates.length === 1 ? editor.candidates[0] : undefined)
 
-  // The source the fields are filled from, and the source they were last filled
-  // from. Re-running the fill only when that key changes is what keeps a manual
-  // edit standing: the next read republishes the same candidates without it,
-  // and picking the same entry again refills it directly.
-  //
   // The three sources are ranked, not merged: a catalog entry is what the model
   // will be compared against, so it wins over what the endpoint disclosed about
   // the id; the endpoint's answer wins over the route's own template.
-  const source = active === undefined
-    ? upstream === null
-      ? { key: 'template', fields: templateFields(template) }
-      : { key: `upstream:${upstream.id}`, fields: upstreamFields(upstream) }
-    : { key: optionKey(active), fields: fieldsFrom(active) }
+  const source: Fill = active !== undefined
+    ? { key: optionKey(active), fields: fieldsFromEntry(active.model) }
+    : upstream !== null
+      ? { key: `upstream:${upstream.id}`, fields: fieldsFromUpstream(upstream) }
+      : { key: 'template', fields: fieldsFromTemplate(template) }
   const filled = useRef<string | null>(null)
   useEffect(() => {
     if (filled.current === source.key) return
     filled.current = source.key
-    setFields(source.fields)
+    setDraft(source.fields)
   })
 
-  const efforts = route.route.reasoningCapable ? effortsFromFields(fields) : undefined
-  const draft: NewModelEntry = {
-    id: modelId,
-    ...fields.name.trim() === '' ? {} : { name: fields.name },
-    ...fields.context.trim() === '' ? {} : { contextWindow: Number(fields.context) },
-    ...fields.output.trim() === '' ? {} : { maxTokens: Number(fields.output) },
-    inputModalities: fields.image ? ['text', 'image'] : ['text'],
+  const context = parseCapacity(draft.contextWindow)
+  const output = parseCapacity(draft.maxTokens)
+  const efforts = route.route.reasoningCapable ? effortsOf(draft.reasoning) : undefined
+  const entry: NewModelEntry = {
+    id: editor.modelId,
+    ...draft.name.trim() === '' ? {} : { name: draft.name },
+    ...context.kind === 'count' ? { contextWindow: context.value } : {},
+    ...output.kind === 'count' ? { maxTokens: output.value } : {},
+    inputModalities: draft.inputModalities,
     ...efforts === undefined ? {} : { reasoningEfforts: efforts },
     ...template.modalityField === undefined ? {} : { modalityField: template.modalityField },
   }
-  const problem = newModelProblem(route.route, draft)
-  const named = modelId.trim() !== ''
-  const disabled = !writable || busy
-  // The ids the route already stores, so the endpoint's own listing can say
-  // which of them is not a candidate for adding rather than offering one the
-  // confirm button would refuse.
-  const configured = useMemo(() => new Set(route.route.models.map(model => model.id)), [route])
+  const problem: NewModelProblem | undefined = newModelProblem(route.route, entry)
+  const named = editor.modelId.trim() !== ''
+  const configured = useMemo(() => new Set(route.route.models.map(model => model.id)), [route.route.models])
   const probe: UpstreamProbe = {
-    discovering: picker.discovering,
-    models: picker.discovered,
-    error: picker.discoverError,
+    discovering: editor.discovering,
+    models: editor.discovered,
+    error: editor.discoverError,
     chosen: upstream === null ? null : upstream.id,
     configured,
     onFetch: onDiscover,
@@ -137,19 +166,18 @@ export function AddModelDialog({
       // and refills the preview from what the endpoint disclosed — exactly as
       // choosing a catalog entry refills it from that entry.
       setUpstream(model)
-      setModelId(model.id)
-      setFields(upstreamFields(model))
+      setDraft(fieldsFromUpstream(model))
       onSearch(model.id, false)
     },
   }
 
   const submit = (): void => {
     if (disabled || problem !== undefined) return
-    // The entry the fields were filled from is what the new model follows, the
-    // same preference the editor files: an added gateway id has no comparison
-    // otherwise, and the values just taken from that entry would be compared
-    // against nothing. An id the catalog answered nothing for follows its id.
-    onSubmit(draft, active === undefined ? undefined : bindingOf(active))
+    // The entry the fields were filled from is what the new model follows: an
+    // added gateway id has no comparison otherwise, and the values just taken
+    // from that entry would be compared against nothing. An id the catalog
+    // answered nothing for follows its id.
+    onSubmit(entry, active === undefined ? undefined : { providerId: active.providerId, modelId: active.model.id })
   }
 
   return (
@@ -157,54 +185,111 @@ export function AddModelDialog({
       open
       onClose={onClose}
       title={t('addModelTitle')}
-      closeLabel={t('addModelClose')}
+      closeLabel={t('close')}
       description={t('addModelDescription', { provider: route.route.displayName })}
-      // The two class names are asserted rather than optional: a CSS-module key
-      // is possibly undefined under this project's declarations, and a card that
-      // silently fell back to the shared default would be the narrow one again.
-      className={css.pickerDialog as string}
-      contentClassName={css.pickerContent as string}
+      className={css['dialog'] as string}
+      contentClassName={css['dialogContent'] as string}
       footer={(
         <>
-          <Button variant="outline" onClick={onClose}>{t('addModelCancel')}</Button>
+          <Button variant="outline" onClick={onClose}>{t('cancel')}</Button>
           <Button variant="primary" disabled={disabled || problem !== undefined} onClick={submit}>
-            {t('addModelSubmit')}
+            {t('addSubmit')}
           </Button>
         </>
       )}
     >
-      <div className={css.addForm}>
-        <CandidatePicker
-          picker={picker}
+      <div className={css['addForm']}>
+        <CandidateList
+          editor={editor}
           active={active}
           disabled={disabled}
           t={t}
-          modelId={modelId}
-          onSearch={value => { setModelId(value); onSearch(value, false) }}
-          onSearchSimilar={value => { onSearch(value, true) }}
-          onChoose={(option) => { setChosen(optionKey(option)); setFields(fieldsFrom(option)) }}
-          onConfirm={submit}
           upstream={probe}
+          onSearch={onSearch}
+          onChoose={(option) => { setChosen(optionKey(option)); setDraft(fieldsFromEntry(option.model)) }}
+          onConfirm={submit}
         />
-        <ModelFields
-          fields={fields} disabled={disabled} t={t} onChange={setFields}
-          reasoningCapable={route.route.reasoningCapable}
-        />
-        {!named || problem === undefined ? null : (
-          <p className={css.diagnostic} role="alert">{t(PROBLEM_KEYS[problem])}</p>
-        )}
+        <div className={css['specGrid']}>
+          <label className={css['specField']}>
+            <span className={css['specLabel']}>{t('addModelName')}</span>
+            <input
+              className={css['input']}
+              type="text"
+              value={draft.name}
+              placeholder={t('addModelNamePlaceholder')}
+              disabled={disabled}
+              onChange={(event) => { setDraft({ ...draft, name: event.target.value }) }}
+            />
+          </label>
+          <CapacityField
+            label={t('fieldContext')}
+            value={draft.contextWindow}
+            published={active?.model.contextWindow}
+            adopted={context.kind === 'count' && context.value === active?.model.contextWindow}
+            disabled={disabled}
+            t={t}
+            onChange={(text) => { setDraft({ ...draft, contextWindow: text }) }}
+            {...active === undefined ? {} : {
+              onAdopt: () => {
+                if (active.model.contextWindow !== undefined) {
+                  setDraft({ ...draft, contextWindow: String(active.model.contextWindow) })
+                }
+              },
+            }}
+          />
+          <CapacityField
+            label={t('fieldMaxTokens')}
+            value={draft.maxTokens}
+            published={active?.model.maxOutputTokens}
+            adopted={output.kind === 'count' && output.value === active?.model.maxOutputTokens}
+            disabled={disabled}
+            t={t}
+            onChange={(text) => { setDraft({ ...draft, maxTokens: text }) }}
+            {...active === undefined ? {} : {
+              onAdopt: () => {
+                if (active.model.maxOutputTokens !== undefined) {
+                  setDraft({ ...draft, maxTokens: String(active.model.maxOutputTokens) })
+                }
+              },
+            }}
+          />
+          {template.modalityField === undefined
+            ? null
+            : (
+              <ModalitiesField
+                value={draft.inputModalities}
+                published={active?.model.inputModalities}
+                disabled={disabled}
+                t={t}
+                onChange={(modalities) => { setDraft({ ...draft, inputModalities: modalities }) }}
+                {...active === undefined ? {} : {
+                  onAdopt: () => {
+                    if (active.model.inputModalities.length > 0) {
+                      setDraft({ ...draft, inputModalities: [...active.model.inputModalities] })
+                    }
+                  },
+                }}
+              />
+            )}
+          {route.route.reasoningCapable
+            ? (
+              <ReasoningField
+                value={draft.reasoning}
+                published={active?.model.declaredEfforts}
+                disabled={disabled}
+                t={t}
+                onChange={(reasoning) => { setDraft({ ...draft, reasoning }) }}
+                {...active?.model.declaredEfforts === undefined ? {} : {
+                  onAdopt: () => { setDraft({ ...draft, reasoning: reasoningDraft(active?.model.declaredEfforts) }) },
+                }}
+              />
+            )
+            : null}
+        </div>
+        {!named || problem === undefined
+          ? null
+          : <p className={css['error']} role="alert">{t(PROBLEM_KEYS[problem])}</p>}
       </div>
     </Modal>
   )
-}
-
-/** The template's values, shaped as the fields that hold them. */
-function templateFields(template: ReturnType<typeof newModelTemplate>): PickerFields {
-  return {
-    name: '',
-    context: template.contextWindow === undefined ? '' : String(template.contextWindow),
-    output: template.maxTokens === undefined ? '' : String(template.maxTokens),
-    image: template.inputModalities.includes('image'),
-    ...effortFields(template.reasoningEfforts),
-  }
 }
